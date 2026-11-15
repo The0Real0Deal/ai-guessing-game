@@ -85,10 +85,15 @@
     $('word-count-hint').textContent = `${lines.length} ביטויים ברשימה`;
   }
 
-  // Initialize default sample words
+  // Initialize default sample words & saved Gemini key
   $('input-word-pool').value = SAMPLE_WORDS.join('\n');
   updateWordCountHint();
   $('input-word-pool').addEventListener('input', updateWordCountHint);
+
+  const savedGeminiKey = localStorage.getItem('gemini_api_key') || '';
+  if (savedGeminiKey) {
+    $('input-gemini-key').value = savedGeminiKey;
+  }
 
   $('btn-load-sample-words').addEventListener('click', () => {
     $('input-word-pool').value = SAMPLE_WORDS.join('\n');
@@ -126,6 +131,13 @@
       .filter(Boolean);
     const rounds = Number($('input-rounds').value) || 3;
     const timerSeconds = Number($('input-timer').value) || 60;
+    const geminiApiKey = $('input-gemini-key').value.trim();
+
+    if (geminiApiKey) {
+      localStorage.setItem('gemini_api_key', geminiApiKey);
+    } else {
+      localStorage.removeItem('gemini_api_key');
+    }
 
     if (wordPool.length === 0) {
       showError('setup-error', 'אנא הזינו לפחות מילה או ביטוי אחד.');
@@ -133,7 +145,7 @@
     }
 
     $('btn-create-room').disabled = true;
-    socket.emit('host:create_room', { wordPool, rounds, timerSeconds }, (res) => {
+    socket.emit('host:create_room', { wordPool, rounds, timerSeconds, geminiApiKey }, (res) => {
       $('btn-create-room').disabled = false;
       if (!res?.ok) {
         showError('setup-error', res?.error || 'שגיאה ביצירת החדר');
@@ -143,14 +155,15 @@
       sessionStorage.setItem('game_role', 'host');
       sessionStorage.setItem('game_room', roomCode);
       renderHostState(res.state);
-      fetchQRCode(roomCode);
+      initLobbyNetwork(roomCode);
     });
   });
 
-  async function fetchQRCode(code) {
+  let currentInviteUrl = '';
+
+  async function fetchQRCodeForUrl(targetUrl) {
     try {
-      const joinUrl = `${window.location.origin}/?room=${code}`;
-      const resp = await fetch(`/api/qr?url=${encodeURIComponent(joinUrl)}`);
+      const resp = await fetch(`/api/qr?url=${encodeURIComponent(targetUrl)}`);
       if (!resp.ok) return;
       const data = await resp.json();
       if (data?.dataUrl) {
@@ -158,9 +171,79 @@
         $('lobby-qr-wrap').classList.remove('hidden');
       }
     } catch {
-      // Optional enhancement; ignore if fails
+      // ignore
     }
   }
+
+  async function initLobbyNetwork(code) {
+    try {
+      const resp = await fetch('/api/network-info');
+      const info = await resp.json();
+      if (info.publicUrl) {
+        applyPublicTunnel(info.publicUrl, info.tunnelPassword, code);
+      } else {
+        const hostBase =
+          window.location.hostname === 'localhost' && info.localIp !== 'localhost'
+            ? `http://${info.localIp}:${info.port}`
+            : window.location.origin;
+        currentInviteUrl = `${hostBase}/?room=${code}`;
+        $('lobby-join-url-text').innerHTML = `באותו Wi-Fi: <code>${currentInviteUrl}</code>`;
+        $('btn-copy-invite').classList.remove('hidden');
+        fetchQRCodeForUrl(currentInviteUrl);
+      }
+    } catch {
+      currentInviteUrl = `${window.location.origin}/?room=${code}`;
+      fetchQRCodeForUrl(currentInviteUrl);
+    }
+  }
+
+  function applyPublicTunnel(publicUrl, tunnelPassword, code) {
+    currentInviteUrl = `${publicUrl}/?room=${code}`;
+    $('lobby-join-url-text').innerHTML = `קישור ציבורי מכל מקום: <code dir="ltr">${currentInviteUrl}</code>`;
+    $('btn-copy-invite').classList.remove('hidden');
+    $('btn-open-tunnel').textContent = '✅ קישור ציבורי פעיל';
+    $('btn-open-tunnel').disabled = true;
+
+    const box = $('tunnel-status-box');
+    box.classList.remove('hidden');
+    box.innerHTML = tunnelPassword
+      ? `הקישור פתוח לשחקנים גם מחוץ ל-Wi-Fi! (אם מופיע מסך אבטחה חד-פעמי בטלפון, הזינו סיסמה: <code dir="ltr">${tunnelPassword}</code>)`
+      : `הקישור פתוח לשחקנים מכל מקום באינטרנט!`;
+
+    fetchQRCodeForUrl(currentInviteUrl);
+  }
+
+  $('btn-open-tunnel').addEventListener('click', async () => {
+    const btn = $('btn-open-tunnel');
+    btn.disabled = true;
+    btn.textContent = 'פותח קישור ציבורי...';
+    showError('lobby-error', '');
+    try {
+      const resp = await fetch('/api/tunnel/start', { method: 'POST' });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) {
+        throw new Error(data.error || 'שגיאה בפתיחת הקישור');
+      }
+      applyPublicTunnel(data.publicUrl, data.tunnelPassword, roomCode);
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = '🌐 פתח קישור ציבורי (לשחקנים מחוץ ל-Wi-Fi)';
+      showError('lobby-error', err.message);
+    }
+  });
+
+  $('btn-copy-invite').addEventListener('click', async () => {
+    if (!currentInviteUrl) return;
+    try {
+      await navigator.clipboard.writeText(currentInviteUrl);
+      const btn = $('btn-copy-invite');
+      const prev = btn.textContent;
+      btn.textContent = '✅ הועתק!';
+      setTimeout(() => (btn.textContent = prev), 1800);
+    } catch {
+      // ignore
+    }
+  });
 
   // Host: Start Game
   $('btn-start-game').addEventListener('click', () => {
@@ -512,7 +595,7 @@
           role = 'host';
           roomCode = savedRoom;
           renderHostState(res.state);
-          fetchQRCode(savedRoom);
+          initLobbyNetwork(savedRoom);
         }
       });
     } else if (savedRole === 'player' && savedRoom && savedPlayerId) {

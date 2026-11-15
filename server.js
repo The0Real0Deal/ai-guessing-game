@@ -1,8 +1,10 @@
 const express = require('express');
 const http = require('http');
+const os = require('os');
 const path = require('path');
 const { Server } = require('socket.io');
 const QRCode = require('qrcode');
+const localtunnel = require('localtunnel');
 const { generateAIImage } = require('./imageGenerator');
 
 const app = express();
@@ -12,6 +14,22 @@ const io = new Server(server, {
 });
 
 const PORT = process.env.PORT || 3000;
+
+let activeTunnel = null;
+let publicTunnelUrl = null;
+let publicTunnelPassword = null;
+
+function getLocalIPv4() {
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name] || []) {
+      if (net.family === 'IPv4' && !net.internal) {
+        return net.address;
+      }
+    }
+  }
+  return 'localhost';
+}
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -218,11 +236,66 @@ app.get('/api/qr', async (req, res) => {
     const dataUrl = await QRCode.toDataURL(String(targetUrl), {
       width: 220,
       margin: 1,
-      color: { dark: '#181A20', light: '#FFFFFF' },
+      color: { dark: '#111111', light: '#FFFFFF' },
     });
     res.json({ dataUrl });
   } catch (err) {
     res.status(500).json({ error: 'Failed to generate QR' });
+  }
+});
+
+// Network & Public Tunnel Info
+app.get('/api/network-info', (req, res) => {
+  res.json({
+    localIp: getLocalIPv4(),
+    port: PORT,
+    publicUrl: publicTunnelUrl,
+    tunnelPassword: publicTunnelPassword,
+  });
+});
+
+app.post('/api/tunnel/start', async (req, res) => {
+  try {
+    if (publicTunnelUrl && activeTunnel) {
+      return res.json({
+        ok: true,
+        publicUrl: publicTunnelUrl,
+        tunnelPassword: publicTunnelPassword,
+      });
+    }
+
+    const tunnel = await localtunnel({ port: Number(PORT) });
+    activeTunnel = tunnel;
+    publicTunnelUrl = tunnel.url;
+
+    tunnel.on('close', () => {
+      activeTunnel = null;
+      publicTunnelUrl = null;
+    });
+
+    // Fetch public IP for localtunnel's one-time bypass password if needed
+    try {
+      const ipRes = await fetch('https://api.ipify.org?format=json', {
+        signal: AbortSignal.timeout(4000),
+      });
+      if (ipRes.ok) {
+        const ipData = await ipRes.json();
+        publicTunnelPassword = ipData?.ip || null;
+      }
+    } catch {
+      publicTunnelPassword = null;
+    }
+
+    res.json({
+      ok: true,
+      publicUrl: publicTunnelUrl,
+      tunnelPassword: publicTunnelPassword,
+    });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: 'לא ניתן לפתוח קישור ציבורי כרגע. בדקו חיבור לאינטרנט או השתמשו ב-Wi-Fi המקומי.',
+    });
   }
 });
 
@@ -242,6 +315,7 @@ io.on('connection', (socket) => {
 
       const rounds = Math.max(1, Math.min(20, Number(payload?.rounds) || 3));
       const timerSeconds = Math.max(10, Math.min(300, Number(payload?.timerSeconds) || 60));
+      const geminiApiKey = String(payload?.geminiApiKey || '').trim();
 
       const roomCode = generateRoomCode();
       const room = {
@@ -251,6 +325,7 @@ io.on('connection', (socket) => {
           wordPool,
           rounds,
           timerSeconds,
+          geminiApiKey,
         },
         unusedWords: shuffle(wordPool),
         phase: 'lobby',
@@ -476,7 +551,9 @@ io.on('connection', (socket) => {
     broadcastRoomState(room);
 
     try {
-      const result = await generateAIImage(cleanPrompt);
+      const result = await generateAIImage(cleanPrompt, {
+        geminiApiKey: room.settings.geminiApiKey,
+      });
       player.imageUrl = result.imageUrl;
       player.isGenerating = false;
       broadcastRoomState(room);
