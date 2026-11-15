@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>נחשו את התמונה — משחק ניחושים מבוסס בינה מלאכותית</title>
+  <meta name="description" content="משחק חברתי בזמן אמת המשלב מסך ראשי משותף ומסכים אישיים בסמארטפונים עם יצירת תמונות בבינה מלאכותית." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&family=Rubik:wght@500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="confetti-layer" class="confetti-layer" aria-hidden="true"></div>
+
+  <div class="app-shell">
+    <!-- Top Compact Bar (shown when inside a room) -->
+    <header id="top-bar" class="top-bar hidden">
+      <div class="top-bar-brand">
+        <span class="brand-mark">🎨</span>
+        <span class="brand-name">נחשו את התמונה</span>
+      </div>
+      <div class="top-bar-meta">
+        <span id="top-room-badge" class="meta-chip hidden">חדר <strong id="top-room-code">----</strong></span>
+        <span id="top-round-badge" class="meta-chip hidden">סיבוב <strong id="top-round-text">1/3</strong></span>
+      </div>
+    </header>
+
+    <main id="app-main" class="app-main">
+      <!-- 1. LANDING SCREEN -->
+      <section id="view-landing" class="view active">
+        <div class="hero-card">
+          <div class="hero-icon" aria-hidden="true">🖼️</div>
+          <h1>נחשו את התמונה</h1>
+          <p class="hero-subtitle">
+            הופכים מילים לתמונות בעזרת בינה מלאכותית ומנחשים יחד בסלון.
+            בחרו איך תרצו להתחבר:
+          </p>
+
+          <div class="role-grid">
+            <button id="btn-choose-host" class="role-card role-host" type="button">
+              <span class="role-emoji" aria-hidden="true">📺</span>
+              <span class="role-title">מסך ראשי (מארח)</span>
+              <span class="role-desc">להקרנה על טלוויזיה או מחשב נייד</span>
+            </button>
+
+            <button id="btn-choose-player" class="role-card role-player" type="button">
+              <span class="role-emoji" aria-hidden="true">📱</span>
+              <span class="role-title">הצטרפות כשחקן</span>
+              <span class="role-desc">מהסמארטפון האישי עם קוד חדר</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. HOST SETUP SCREEN -->
+      <section id="view-host-setup" class="view">
+        <div class="panel-card host-setup-card">
+          <div class="card-header-row">
+            <button id="btn-back-from-setup" class="btn-ghost" type="button">→ חזרה</button>
+            <h2>הגדרת משחק חדש</h2>
+          </div>
+
+          <form id="form-create-room" class="stack-form">
+            <div class="field-group">
+              <div class="label-row">
+                <label for="input-word-pool">רשימת מילים או ביטויים לניחוש (פריט אחד בכל שורה)</label>
+                <button id="btn-load-sample-words" class="btn-link" type="button">טען רשימת דוגמה</button>
+              </div>
+              <textarea
+                id="input-word-pool"
+                rows="7"
+                placeholder="הזינו מילים או ביטויים, שורה לכל פריט..."
+                required
+              ></textarea>
+              <span id="word-count-hint" class="field-hint">0 ביטויים ברשימה</span>
+            </div>
+
+            <div class="settings-row">
+              <div class="field-group">
+                <label for="input-rounds">מספר סיבובים</label>
+                <input id="input-rounds" type="number" min="1" max="20" value="3" required />
+              </div>
+
+              <div class="field-group">
+                <label for="input-timer">זמן ניחוש לתמונה (בשניות)</label>
+                <input id="input-timer" type="number" min="10" max="300" value="60" required />
+              </div>
+            </div>
+
+            <div id="setup-error" class="error-banner hidden"></div>
+
+            <button id="btn-create-room" class="btn-primary btn-lg" type="submit">
+              צור חדר
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <!-- 3. HOST MAIN SCREEN: LOBBY -->
+      <section id="view-host-lobby" class="view">
+        <div class="main-screen-layout">
+          <div class="lobby-hero">
+            <div class="room-code-box">
+              <span class="room-code-label">קוד חדר להצטרפות</span>
+              <div id="lobby-room-code" class="room-code-digits" dir="ltr">0000</div>
+              <p class="room-join-hint">היכנסו מהטלפון והזינו את הקוד</p>
+            </div>
+            <div id="lobby-qr-wrap" class="qr-box hidden">
+              <img id="lobby-qr-img" alt="קוד QR להצטרפות למשחק" />
+              <span>סרקו להצטרפות מהירה</span>
+            </div>
+          </div>
+
+          <div class="lobby-players-panel">
+            <div class="panel-title-row">
+              <h3>שחקנים שהצטרפו (<span id="lobby-player-count">0</span>)</h3>
+            </div>
+            <div id="lobby-players-list" class="players-grid">
+              <div class="empty-state">ממתינים לשחקנים שיצטרפו מהטלפונים...</div>
+            </div>
+          </div>
+
+          <div id="lobby-error" class="error-banner hidden"></div>
+
+          <div class="lobby-actions">
+            <button id="btn-start-game" class="btn-primary btn-xl" type="button" disabled>
+              התחל משחק
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. HOST MAIN SCREEN: PHASE 1 (PROMPT WRITING STATUS) -->
+      <section id="view-host-prompting" class="view">
+        <div class="main-screen-layout">
+          <div class="phase-banner">
+            <h2>שלב 1: יצירת התמונות בטלפונים</h2>
+            <p>כל שחקן קיבל ביטוי סודי וכותב תיאור לבינה המלאכותית</p>
+          </div>
+
+          <div id="host-prompting-players" class="status-cards-grid"></div>
+
+          <div class="waiting-footer">
+            <div class="pulse-indicator"></div>
+            <span>המשחק יעבור אוטומטית לשלב הניחוש כשכל השחקנים ילחצו "מוכן"</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. HOST MAIN SCREEN: PHASE 2 (LIVE GUESSING) -->
+      <section id="view-host-guessing" class="view">
+        <div class="guessing-stage">
+          <div class="guessing-header">
+            <div class="image-counter">
+              תמונה <span id="guess-index">1</span> מתוך <span id="guess-total">1</span>
+            </div>
+            <div id="guess-timer-box" class="timer-pill">
+              <span class="timer-icon">⏱️</span>
+              <span id="guess-timer-value" dir="ltr">60</span>
+              <span>שניות</span>
+            </div>
+          </div>
+
+          <div class="guessing-canvas-wrap">
+            <img id="guess-image" class="guess-image" src="" alt="תמונה לניחוש" />
+
+            <!-- Celebration Reveal Overlay -->
+            <div id="guess-reveal-banner" class="reveal-banner hidden">
+              <div class="reveal-badge">🎉 ניחשו נכון!</div>
+              <div class="reveal-word" id="reveal-word-text"></div>
+              <div class="reveal-creator">
+                נוצר על ידי <strong id="reveal-creator-name"></strong>
+              </div>
+              <div class="reveal-prompt" id="reveal-prompt-text"></div>
+            </div>
+          </div>
+
+          <div class="guessing-controls">
+            <button id="btn-guessed-correctly" class="btn-success btn-xl" type="button">
+              ניחשו נכון!
+            </button>
+            <button id="btn-next-image" class="btn-secondary btn-xl" type="button">
+              עבור לתמונה הבאה
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6. HOST MAIN SCREEN: END GAME SUMMARY -->
+      <section id="view-host-summary" class="view">
+        <div class="main-screen-layout">
+          <div class="summary-hero">
+            <div class="trophy-icon" aria-hidden="true">🏆</div>
+            <h2>המשחק הסתיים!</h2>
+            <p>כל הסיבובים הושלמו — הנה התוצאות והרגעים הגדולים</p>
+          </div>
+
+          <div class="summary-columns">
+            <div class="panel-card">
+              <h3>טבלת ניקוד</h3>
+              <ol id="summary-leaderboard" class="leaderboard-list"></ol>
+            </div>
+
+            <div class="panel-card">
+              <h3>גלריית הסיבובים</h3>
+              <div id="summary-gallery" class="summary-gallery"></div>
+            </div>
+          </div>
+
+          <div class="lobby-actions">
+            <button id="btn-play-again" class="btn-primary btn-xl" type="button">
+              משחק חדש באותו חדר
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 7. PLAYER PHONE: JOIN ROOM -->
+      <section id="view-player-join" class="view mobile-view">
+        <div class="panel-card mobile-card">
+          <div class="card-header-row">
+            <button id="btn-back-from-join" class="btn-ghost" type="button">→ חזרה</button>
+            <h2>הצטרפות למשחק</h2>
+          </div>
+
+          <form id="form-join-room" class="stack-form">
+            <div class="field-group">
+              <label for="input-join-code">קוד חדר (4 ספרות)</label>
+              <input
+                id="input-join-code"
+                type="text"
+                inputmode="numeric"
+                pattern="[0-9]{4}"
+                maxlength="4"
+                placeholder="1234"
+                class="input-code"
+                dir="ltr"
+                required
+              />
+            </div>
+
+            <div class="field-group">
+              <label for="input-join-nickname">הכינוי שלך</label>
+              <input
+                id="input-join-nickname"
+                type="text"
+                maxlength="24"
+                placeholder="לדוגמה: דניאל"
+                required
+              />
+            </div>
+
+            <div id="join-error" class="error-banner hidden"></div>
+
+            <button id="btn-join-room" class="btn-primary btn-lg btn-touch" type="submit">
+              הצטרף לחדר
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <!-- 8. PLAYER PHONE: LOBBY WAITING -->
+      <section id="view-player-lobby" class="view mobile-view">
+        <div class="panel-card mobile-card center-content">
+          <div class="status-illustration" aria-hidden="true">✨</div>
+          <h2>התחברת בהצלחה!</h2>
+          <p class="muted-text">
+            שלום <strong id="player-lobby-name"></strong>, אנחנו ממתינים שהמארח יתחיל את המשחק על המסך הראשי.
+          </p>
+          <div class="waiting-chip">
+            <div class="pulse-indicator"></div>
+            <span>ממתין לתחילת הסיבוב...</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 9. PLAYER PHONE: PHASE 1 (PROMPT WRITING & IMAGE GEN) -->
+      <section id="view-player-prompting" class="view mobile-view">
+        <div class="panel-card mobile-card">
+          <div class="secret-word-box">
+            <span class="secret-label">הביטוי הסודי שלך לסיבוב זה:</span>
+            <div id="player-secret-word" class="secret-word">---</div>
+            <span class="secret-tip">תארו אותו בלי לכתוב את המילה עצמה!</span>
+          </div>
+
+          <div class="field-group">
+            <label for="input-ai-prompt">תיאור ליצירת תמונה (Prompt)</label>
+            <textarea
+              id="input-ai-prompt"
+              rows="3"
+              placeholder="לדוגמה: איור צבעוני בסגנון קומיקס של חתול מרכיב משקפי שמש על חוף הים..."
+            ></textarea>
+          </div>
+
+          <div id="player-prompt-error" class="error-banner hidden"></div>
+
+          <button id="btn-generate-image" class="btn-primary btn-touch" type="button">
+            צור תמונה
+          </button>
+
+          <div id="player-image-preview-wrap" class="preview-box hidden">
+            <div id="player-generating-overlay" class="generating-overlay hidden">
+              <div class="spinner"></div>
+              <span>יוצר תמונה באמצעות בינה מלאכותית...</span>
+            </div>
+            <img id="player-generated-image" src="" alt="התמונה שנוצרה" />
+            <p class="preview-hint">לא מרוצים? שנו את התיאור ולחצו שוב על "צור תמונה"</p>
+          </div>
+
+          <button id="btn-player-ready" class="btn-success btn-touch hidden" type="button">
+            מוכן
+          </button>
+
+          <div id="player-ready-confirmed" class="ready-confirmed-box hidden">
+            <span>✅ סימנת שאתה מוכן! ממתינים לשאר השחקנים...</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 10. PLAYER PHONE: PHASE 2 (WATCH MAIN SCREEN) -->
+      <section id="view-player-guessing" class="view mobile-view">
+        <div class="panel-card mobile-card center-content">
+          <div class="status-illustration" aria-hidden="true">👀</div>
+          <h2>הסתכלו על המסך הראשי!</h2>
+          <p class="muted-text">
+            התמונות מוצגות כעת על המסך המשותף. נסו לנחש בקול רם יחד עם כולם!
+          </p>
+          <div class="score-pill">
+            הניקוד שלך: <strong id="player-current-score">0</strong>
+          </div>
+        </div>
+      </section>
+
+      <!-- 11. PLAYER PHONE: SUMMARY -->
+      <section id="view-player-summary" class="view mobile-view">
+        <div class="panel-card mobile-card center-content">
+          <div class="status-illustration" aria-hidden="true">🏆</div>
+          <h2>המשחק הסתיים!</h2>
+          <p class="muted-text">
+            הניקוד הסופי שלך: <strong id="player-final-score">0</strong> נקודות
+          </p>
+          <ol id="player-summary-leaderboard" class="leaderboard-list compact"></ol>
+          <p class="muted-text small-note">המארח יכול להתחיל משחק חדש מהמסך הראשי.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
