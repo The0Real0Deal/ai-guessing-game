@@ -1005,3 +1005,60 @@ button {
   .guessing-controls { width: 100%; }
   .guessing-controls button { width: 100%; }
 }
+
+/* API input row & Guesser picker overlay */
+.api-input-row {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.api-input-row input {
+  flex: 1;
+}
+
+.api-input-row .btn-mini {
+  white-space: nowrap;
+  padding: 0 16px;
+}
+
+.guesser-picker {
+  position: absolute;
+  inset: 0;
+  background: rgba(247, 241, 229, 0.96);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  gap: 14px;
+  z-index: 15;
+  animation: popStage 0.2s ease forwards;
+}
+
+.guesser-picker h3 {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 900;
+}
+
+.guesser-picker p {
+  margin: 0;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.guesser-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  max-width: 440px;
+}
+
+.score-breakdown {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--ink-muted);
+}

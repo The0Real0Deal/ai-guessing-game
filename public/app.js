@@ -245,6 +245,38 @@
     }
   });
 
+  let latestHostState = null;
+
+  // Host: Test Gemini Key
+  $('btn-test-gemini').addEventListener('click', async () => {
+    const apiKey = $('input-gemini-key').value.trim();
+    const statusEl = $('gemini-test-status');
+    statusEl.classList.remove('hidden');
+    if (!apiKey) {
+      statusEl.textContent = '⚠️ הזינו מפתח Gemini API קודם.';
+      return;
+    }
+    statusEl.textContent = 'בודק את המפתח מול Google Gemini...';
+    $('btn-test-gemini').disabled = true;
+    try {
+      const resp = await fetch('/api/test-gemini', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey }),
+      });
+      const data = await resp.json();
+      if (data.ok) {
+        statusEl.textContent = `✅ המפתח תקין ויוצר תמונות עם ${data.provider}!`;
+      } else {
+        statusEl.textContent = `⚠️ ${data.error}`;
+      }
+    } catch {
+      statusEl.textContent = '⚠️ שגיאה בבדיקת המפתח.';
+    } finally {
+      $('btn-test-gemini').disabled = false;
+    }
+  });
+
   // Host: Start Game
   $('btn-start-game').addEventListener('click', () => {
     showError('lobby-error', '');
@@ -255,13 +287,43 @@
     });
   });
 
-  // Host: Guessed Correctly! (ניחשו נכון!)
+  // Host: Start Guessing Phase manually when ready
+  $('btn-start-guessing').addEventListener('click', () => {
+    socket.emit('host:start_guessing', { roomCode });
+  });
+
+  // Host: Guessed Correctly! (ניחשו נכון!) -> Open guesser picker
   $('btn-guessed-correctly').addEventListener('click', () => {
-    socket.emit('host:guessed_correctly', { roomCode });
+    if (!latestHostState) return;
+    const players = (latestHostState.players || []).filter((p) => p.connected);
+    const listEl = $('guesser-picker-list');
+    listEl.innerHTML = players
+      .map(
+        (p) => `
+        <button class="btn-brutal btn-coral guesser-choice" data-id="${escapeHtml(p.id)}" type="button">
+          ${escapeHtml(p.nickname)}
+        </button>`
+      )
+      .join('');
+
+    listEl.querySelectorAll('.guesser-choice').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const guesserId = btn.getAttribute('data-id');
+        $('guesser-picker-overlay').classList.add('hidden');
+        socket.emit('host:guessed_correctly', { roomCode, guesserId });
+      });
+    });
+
+    $('guesser-picker-overlay').classList.remove('hidden');
+  });
+
+  $('btn-cancel-picker').addEventListener('click', () => {
+    $('guesser-picker-overlay').classList.add('hidden');
   });
 
   // Host: Next Image (עבור לתמונה הבאה)
   $('btn-next-image').addEventListener('click', () => {
+    $('guesser-picker-overlay').classList.add('hidden');
     socket.emit('host:next_image', { roomCode });
   });
 
@@ -323,6 +385,9 @@
         return;
       }
       $('player-generated-image').src = res.imageUrl;
+      $('player-provider-hint').textContent = res.geminiError
+        ? `נוצר עם ${res.provider} (שגיאת Gemini: ${res.geminiError}) — אפשר לשנות תיאור ולייצר שוב`
+        : `נוצר עם ${res.provider} — לא מרוצים? שנו תיאור ולחצו שוב`;
       $('btn-player-ready').classList.remove('hidden');
       $('player-ready-confirmed').classList.add('hidden');
     });
@@ -346,6 +411,7 @@
   // Render Host Main Screen State
   function renderHostState(state) {
     if (!state) return;
+    latestHostState = state;
     const roundText =
       state.phase === 'lobby'
         ? null
@@ -399,6 +465,14 @@
             </div>`;
         })
         .join('');
+
+      if (state.allPlayersReady) {
+        $('host-waiting-status').classList.add('hidden');
+        $('btn-start-guessing').classList.remove('hidden');
+      } else {
+        $('host-waiting-status').classList.remove('hidden');
+        $('btn-start-guessing').classList.add('hidden');
+      }
       return;
     }
 
@@ -413,9 +487,16 @@
       updateTimerUI(state.timerRemaining);
 
       if (g.revealed) {
+        $('guesser-picker-overlay').classList.add('hidden');
         $('guess-reveal-banner').classList.remove('hidden');
         $('reveal-word-text').textContent = g.word || '';
         $('reveal-creator-name').textContent = g.nickname || '';
+        if (g.guesserNickname) {
+          $('reveal-guesser-line').classList.remove('hidden');
+          $('reveal-guesser-name').textContent = g.guesserNickname;
+        } else {
+          $('reveal-guesser-line').classList.add('hidden');
+        }
         $('reveal-prompt-text').textContent = g.prompt ? `התיאור: "${g.prompt}"` : '';
         $('btn-guessed-correctly').disabled = true;
 
@@ -441,7 +522,10 @@
         .map(
           (p, i) => `
           <li class="leaderboard-item">
-            <span>${i === 0 ? '🥇 ' : i === 1 ? '🥈 ' : i === 2 ? '🥉 ' : ''}${escapeHtml(p.nickname)}</span>
+            <div>
+              <div>${i === 0 ? '🥇 ' : i === 1 ? '🥈 ' : i === 2 ? '🥉 ' : ''}${escapeHtml(p.nickname)}</div>
+              <div class="score-breakdown">ניחש לאחרים: ${p.guessedOthersScore || 0} | זיהו לו: ${p.creatorGuessedScore || 0}</div>
+            </div>
             <span>${p.score} נק׳</span>
           </li>`
         )
@@ -454,7 +538,7 @@
             <img src="${item.imageUrl}" alt="${escapeHtml(item.word)}" />
             <div class="gallery-caption">
               <strong>${escapeHtml(item.word)}</strong>
-              <span>${escapeHtml(item.nickname)} ${item.guessedCorrectly ? '✅' : '⏱️'}</span>
+              <span>יוצר: ${escapeHtml(item.nickname)}${item.guesserNickname ? ` • ניחש: ${escapeHtml(item.guesserNickname)}` : ''} ${item.guessedCorrectly ? '✅' : '⏱️'}</span>
             </div>
           </div>`
         )

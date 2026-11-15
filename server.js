@@ -125,10 +125,15 @@ function buildMainScreenState(room) {
     id: p.id,
     nickname: p.nickname,
     score: p.score,
+    guessedOthersScore: p.guessedOthersScore || 0,
+    creatorGuessedScore: p.creatorGuessedScore || 0,
     isReady: p.isReady,
     isGenerating: p.isGenerating,
     connected: p.connected,
   }));
+
+  const connectedPlayers = players.filter((p) => p.connected);
+  const allPlayersReady = connectedPlayers.length > 0 && connectedPlayers.every((p) => p.isReady);
 
   let currentGuess = null;
   if (room.phase === 'guessing' && room.guessingQueue[room.currentGuessIndex]) {
@@ -139,11 +144,12 @@ function buildMainScreenState(room) {
       imageUrl: item.imageUrl,
       guessedCorrectly: item.guessedCorrectly,
       revealed: item.revealed,
-      // Only reveal creator and original word once revealed === true
+      // Only reveal creator, guesser, and original word once revealed === true
       ...(item.revealed
         ? {
             word: item.word,
             nickname: item.nickname,
+            guesserNickname: item.guesserNickname || null,
             prompt: item.prompt,
           }
         : {}),
@@ -158,6 +164,7 @@ function buildMainScreenState(room) {
     timerSeconds: room.settings.timerSeconds,
     timerRemaining: room.timer.remaining,
     timerRunning: room.timer.running,
+    allPlayersReady,
     players,
     currentGuess,
     history: room.phase === 'summary' ? room.history : [],
@@ -175,6 +182,8 @@ function buildPlayerState(room, player) {
       id: player.id,
       nickname: player.nickname,
       score: player.score,
+      guessedOthersScore: player.guessedOthersScore || 0,
+      creatorGuessedScore: player.creatorGuessedScore || 0,
       currentWord: room.phase === 'prompting' ? player.currentWord : null,
       prompt: player.prompt,
       imageUrl: player.imageUrl,
@@ -184,7 +193,13 @@ function buildPlayerState(room, player) {
     leaderboard:
       room.phase === 'summary'
         ? Array.from(room.players.values())
-            .map((p) => ({ id: p.id, nickname: p.nickname, score: p.score }))
+            .map((p) => ({
+              id: p.id,
+              nickname: p.nickname,
+              score: p.score,
+              guessedOthersScore: p.guessedOthersScore || 0,
+              creatorGuessedScore: p.creatorGuessedScore || 0,
+            }))
             .sort((a, b) => b.score - a.score)
         : [],
   };
@@ -299,6 +314,29 @@ app.post('/api/tunnel/start', async (req, res) => {
   }
 });
 
+// Test Gemini API key for image generation
+app.post('/api/test-gemini', async (req, res) => {
+  const apiKey = String(req.body?.apiKey || '').trim();
+  if (!apiKey) {
+    return res.status(400).json({ ok: false, error: 'אנא הזינו מפתח Gemini API.' });
+  }
+  try {
+    const result = await generateAIImage('cute orange cat wearing sunglasses', {
+      geminiApiKey: apiKey,
+    });
+    if (result.provider.startsWith('Gemini') || result.provider.startsWith('Google')) {
+      return res.json({ ok: true, provider: result.provider });
+    }
+    return res.json({
+      ok: false,
+      error: result.geminiError || 'המפתח לא הצליח לייצר תמונה ב-Gemini (המשחק ישתמש במנוע החינמי).',
+      fallbackProvider: result.provider,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Socket.IO Real-time handlers
 io.on('connection', (socket) => {
   // Host creates a room
@@ -380,6 +418,8 @@ io.on('connection', (socket) => {
     room.history = [];
     for (const p of room.players.values()) {
       p.score = 0;
+      p.guessedOthersScore = 0;
+      p.creatorGuessedScore = 0;
     }
     assignWordsForRound(room);
     room.phase = 'prompting';
@@ -387,8 +427,28 @@ io.on('connection', (socket) => {
     cb?.({ ok: true });
   });
 
-  // Host clicks "Guessed Correctly!" (ניחשו נכון!)
-  socket.on('host:guessed_correctly', ({ roomCode }, cb) => {
+  // Host decides when to reveal/show the generated images (Phase 1 -> Phase 2)
+  socket.on('host:start_guessing', ({ roomCode }, cb) => {
+    const room = rooms.get(String(roomCode || '').trim());
+    if (!room || room.phase !== 'prompting') {
+      return cb?.({ ok: false, error: 'לא ניתן לעבור לשלב הניחוש כעת.' });
+    }
+    if (room.hostSocketId !== socket.id) {
+      return cb?.({ ok: false, error: 'אין הרשאה.' });
+    }
+
+    const connectedPlayers = Array.from(room.players.values()).filter((p) => p.connected);
+    const allReady = connectedPlayers.length > 0 && connectedPlayers.every((p) => p.isReady);
+    if (!allReady) {
+      return cb?.({ ok: false, error: 'יש להמתין שכל השחקנים יסיימו ליצור תמונה וילחצו "מוכן".' });
+    }
+
+    startGuessingPhase(room);
+    cb?.({ ok: true });
+  });
+
+  // Host clicks "Guessed Correctly!" (ניחשו נכון!) and picks who guessed it
+  socket.on('host:guessed_correctly', ({ roomCode, guesserId }, cb) => {
     const room = rooms.get(String(roomCode || '').trim());
     if (!room || room.phase !== 'guessing') return cb?.({ ok: false });
     if (room.hostSocketId !== socket.id) return cb?.({ ok: false });
@@ -396,13 +456,25 @@ io.on('connection', (socket) => {
     const item = room.guessingQueue[room.currentGuessIndex];
     if (!item || item.revealed) return cb?.({ ok: false });
 
+    const creator = room.players.get(item.playerId);
+    const guesser = guesserId ? room.players.get(guesserId) : null;
+
     item.guessedCorrectly = true;
     item.revealed = true;
+    item.guesserId = guesser ? guesser.id : null;
+    item.guesserNickname = guesser ? guesser.nickname : null;
     stopTimer(room);
 
-    const creator = room.players.get(item.playerId);
+    // Creator gets +1 for their image being guessed
     if (creator) {
-      creator.score += 1;
+      creator.creatorGuessedScore = (creator.creatorGuessedScore || 0) + 1;
+      creator.score = (creator.score || 0) + 1;
+    }
+
+    // Guesser gets +1 for guessing another player's image
+    if (guesser && (!creator || guesser.id !== creator.id)) {
+      guesser.guessedOthersScore = (guesser.guessedOthersScore || 0) + 1;
+      guesser.score = (guesser.score || 0) + 1;
     }
 
     broadcastRoomState(room);
@@ -457,6 +529,8 @@ io.on('connection', (socket) => {
     room.unusedWords = shuffle(room.settings.wordPool);
     for (const p of room.players.values()) {
       p.score = 0;
+      p.guessedOthersScore = 0;
+      p.creatorGuessedScore = 0;
       p.currentWord = null;
       p.prompt = '';
       p.imageUrl = null;
@@ -511,6 +585,8 @@ io.on('connection', (socket) => {
       socketId: socket.id,
       nickname: cleanName,
       score: 0,
+      guessedOthersScore: 0,
+      creatorGuessedScore: 0,
       currentWord: null,
       prompt: '',
       imageUrl: null,
@@ -557,7 +633,12 @@ io.on('connection', (socket) => {
       player.imageUrl = result.imageUrl;
       player.isGenerating = false;
       broadcastRoomState(room);
-      cb?.({ ok: true, imageUrl: result.imageUrl, provider: result.provider });
+      cb?.({
+        ok: true,
+        imageUrl: result.imageUrl,
+        provider: result.provider,
+        geminiError: result.geminiError || null,
+      });
     } catch (err) {
       player.isGenerating = false;
       broadcastRoomState(room);
@@ -565,7 +646,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Player taps Ready (מוכן)
+  // Player taps Ready (מוכן) — Host decides when to reveal images!
   socket.on('player:mark_ready', ({ roomCode, playerId }, cb) => {
     const room = rooms.get(String(roomCode || '').trim());
     if (!room || room.phase !== 'prompting') {
@@ -581,15 +662,7 @@ io.on('connection', (socket) => {
 
     player.isReady = true;
     cb?.({ ok: true });
-
-    const connectedPlayers = Array.from(room.players.values()).filter((p) => p.connected);
-    const allReady = connectedPlayers.length > 0 && connectedPlayers.every((p) => p.isReady);
-
-    if (allReady) {
-      startGuessingPhase(room);
-    } else {
-      broadcastRoomState(room);
-    }
+    broadcastRoomState(room);
   });
 
   // Handle disconnects gracefully
@@ -602,14 +675,6 @@ io.on('connection', (socket) => {
       const player = room.players.get(playerId);
       player.connected = false;
       broadcastRoomState(room);
-
-      // If in prompting phase and all remaining connected players are ready, advance
-      if (room.phase === 'prompting') {
-        const connectedPlayers = Array.from(room.players.values()).filter((p) => p.connected);
-        if (connectedPlayers.length > 0 && connectedPlayers.every((p) => p.isReady)) {
-          startGuessingPhase(room);
-        }
-      }
     }
   });
 });

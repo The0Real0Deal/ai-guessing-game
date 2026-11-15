@@ -92,16 +92,20 @@
             <div class="api-box">
               <div class="label-row">
                 <label for="input-gemini-key">מפתח Gemini API ליצירת תמונות איכותיות (מומלץ)</label>
-                <span class="api-badge">Gemini Image</span>
+                <span class="api-badge">Gemini + תרגום אוטומטי</span>
               </div>
-              <input
-                id="input-gemini-key"
-                type="password"
-                placeholder="AIzaSy... (נשמר מקומית בדפדפן שלך בלבד)"
-                dir="ltr"
-              />
+              <div class="api-input-row">
+                <input
+                  id="input-gemini-key"
+                  type="password"
+                  placeholder="AIzaSy... (נשמר מקומית בדפדפן שלך בלבד)"
+                  dir="ltr"
+                />
+                <button id="btn-test-gemini" class="btn-mini" type="button">בדוק מפתח</button>
+              </div>
+              <span id="gemini-test-status" class="field-hint hidden"></span>
               <span class="field-hint">
-                אם תזינו מפתח Gemini API, התמונות ייווצרו באיכות גבוהה ישירות דרך Google Gemini. ללא מפתח, המשחק ישתמש במנוע החינמי.
+                המפתח מתרגם פרומפטים מעברית לאנגלית ומייצר תמונות דרך Gemini. ללא מפתח (או אם המכסה החינמית מוגבלת), המשחק משתמש אוטומטית ב-Flux AI החינמי.
               </span>
             </div>
 
@@ -165,14 +169,20 @@
         <div class="main-screen-layout">
           <div class="marquee-banner">
             <h2>שלב 1: מציירים עם AI בטלפונים!</h2>
-            <p>כל שחקן קיבל ביטוי סודי וכותב פרומפט — התוצאות יופיעו מיד על המסך</p>
+            <p>כל שחקן קיבל ביטוי סודי ויוצר תמונה — המארח מחליט מתי להציג את התמונות</p>
           </div>
 
           <div id="host-prompting-players" class="status-cards-grid"></div>
 
-          <div class="waiting-footer">
+          <div id="host-waiting-status" class="waiting-footer">
             <div class="pulse-indicator"></div>
-            <span>עוברים אוטומטית לשלב הניחוש ברגע שכולם לוחצים "מוכן"</span>
+            <span>ממתינים שכל השחקנים יסיימו ליצור תמונה וילחצו "מוכן"...</span>
+          </div>
+
+          <div class="lobby-actions">
+            <button id="btn-start-guessing" class="btn-brutal btn-green btn-xl hidden" type="button">
+              👀 כולם מוכנים! הצג את התמונות עכשיו
+            </button>
           </div>
         </div>
       </section>
@@ -194,12 +204,23 @@
           <div class="guessing-canvas-wrap">
             <img id="guess-image" class="guess-image" src="" alt="תמונה לניחוש" />
 
+            <!-- Guesser Picker Overlay (opened when host clicks ניחשו נכון!) -->
+            <div id="guesser-picker-overlay" class="guesser-picker hidden">
+              <h3>מי ניחש את התמונה?</h3>
+              <p>בחרו את השחקן שזיהה נכון כדי להעניק לו ולמצייר נקודה:</p>
+              <div id="guesser-picker-list" class="guesser-list"></div>
+              <button id="btn-cancel-picker" class="btn-back" type="button">ביטול</button>
+            </div>
+
             <!-- Celebration Reveal Overlay -->
             <div id="guess-reveal-banner" class="reveal-banner hidden">
               <div class="reveal-badge">🎉 ניחשו נכון!</div>
               <div class="reveal-word" id="reveal-word-text"></div>
               <div class="reveal-creator">
-                נוצר על ידי <strong id="reveal-creator-name"></strong>
+                נוצר על ידי <strong id="reveal-creator-name"></strong> (+1 נק׳ יוצר)
+              </div>
+              <div id="reveal-guesser-line" class="reveal-creator hidden">
+                נוחש על ידי <strong id="reveal-guesser-name"></strong> (+1 נק׳ מנחש)
               </div>
               <div class="reveal-prompt" id="reveal-prompt-text"></div>
             </div>

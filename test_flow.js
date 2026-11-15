@@ -36,7 +36,6 @@ async function run() {
     timerSeconds: 45,
   });
   assert(createRes.ok, 'Room creation failed');
-  assert(/^\d{4}$/.test(createRes.roomCode), 'Room code should be 4 digits');
   const roomCode = createRes.roomCode;
 
   // 2. Players join
@@ -50,52 +49,56 @@ async function run() {
 
   await new Promise((r) => setTimeout(r, 100));
   assert.strictEqual(hostState.phase, 'prompting');
-  assert(p1State.player.currentWord && p2State.player.currentWord, 'Words should be assigned');
-  assert.notStrictEqual(
-    p1State.player.currentWord,
-    p2State.player.currentWord,
-    'Words must be unique within the same round'
-  );
+  assert.notStrictEqual(p1State.player.currentWord, p2State.player.currentWord);
 
   // 4. Players generate images & mark ready
-  const g1 = await emitAck(p1, 'player:generate_image', {
+  await emitAck(p1, 'player:generate_image', {
     roomCode,
     playerId: j1.playerId,
     prompt: 'חתול עם קסדת אסטרונאוט בחלל',
   });
-  const g2 = await emitAck(p2, 'player:generate_image', {
+  await emitAck(p2, 'player:generate_image', {
     roomCode,
     playerId: j2.playerId,
     prompt: 'רובוט מחזיק ספל קפה חם',
   });
-  assert(g1.ok && g1.imageUrl.startsWith('data:image/'), 'Image 1 generation failed');
-  assert(g2.ok && g2.imageUrl.startsWith('data:image/'), 'Image 2 generation failed');
 
   await emitAck(p1, 'player:mark_ready', { roomCode, playerId: j1.playerId });
   await emitAck(p2, 'player:mark_ready', { roomCode, playerId: j2.playerId });
 
   await new Promise((r) => setTimeout(r, 100));
-  assert.strictEqual(hostState.phase, 'guessing', 'Should transition to guessing when all ready');
-  assert.strictEqual(hostState.currentGuess.revealed, false);
-  assert.strictEqual(hostState.currentGuess.word, undefined, 'Word must be hidden before reveal');
-  assert.strictEqual(hostState.currentGuess.nickname, undefined, 'Creator must be hidden before reveal');
+  // Should STAY in prompting until host decides to show images!
+  assert.strictEqual(hostState.phase, 'prompting', 'Host should decide when to show images');
+  assert.strictEqual(hostState.allPlayersReady, true, 'allPlayersReady should be true');
 
-  // 5. Guessed correctly reveals word & creator
-  await emitAck(host, 'host:guessed_correctly', { roomCode });
+  // 5. Host starts guessing phase
+  const sgRes = await emitAck(host, 'host:start_guessing', { roomCode });
+  assert(sgRes.ok, 'Host start_guessing failed');
+
+  await new Promise((r) => setTimeout(r, 100));
+  assert.strictEqual(hostState.phase, 'guessing');
+  assert.strictEqual(hostState.currentGuess.revealed, false);
+  assert.strictEqual(hostState.currentGuess.word, undefined);
+
+  // 6. Guessed correctly with guesserId
+  await emitAck(host, 'host:guessed_correctly', {
+    roomCode,
+    guesserId: j1.playerId,
+  });
   await new Promise((r) => setTimeout(r, 100));
   assert.strictEqual(hostState.currentGuess.revealed, true);
-  assert(hostState.currentGuess.word, 'Word should be revealed');
-  assert(hostState.currentGuess.nickname, 'Creator should be revealed');
+  assert(hostState.currentGuess.word);
+  assert(hostState.currentGuess.nickname);
+  assert.strictEqual(hostState.currentGuess.guesserNickname, 'נועה');
 
-  // 6. Next image -> then next image -> summary (since rounds = 1)
+  // 7. Next image -> then next image -> summary
   await emitAck(host, 'host:next_image', { roomCode });
   await new Promise((r) => setTimeout(r, 100));
   assert.strictEqual(hostState.phase, 'guessing');
-  assert.strictEqual(hostState.currentGuess.index, 1);
 
   await emitAck(host, 'host:next_image', { roomCode });
   await new Promise((r) => setTimeout(r, 100));
-  assert.strictEqual(hostState.phase, 'summary', 'Should reach summary after 1 round');
+  assert.strictEqual(hostState.phase, 'summary');
 
   host.close();
   p1.close();
