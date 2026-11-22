@@ -217,8 +217,8 @@ export function MainScreenPage() {
       {/* Persistent Game-Show Header */}
       <header className="tv-topbar">
         <div className="tv-brand">
-          <span className="brand-sticker">🎨</span>
-          <span>צייר לי חתול!</span>
+          <span className="brand-sticker">🤖</span>
+          <span>מה הבוט צייר?!</span>
         </div>
 
         <div className="tv-meta-pills">

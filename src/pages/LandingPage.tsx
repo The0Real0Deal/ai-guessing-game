@@ -13,7 +13,7 @@ export function LandingPage() {
 
       <section className="stage-card landing-hero-card">
         <div className="sticker-tag tag-yellow">משחק המסיבות הכי מצחיק בסלון ⚡</div>
-        <h1 className="mega-title">צייר לי חתול! 🎨</h1>
+        <h1 className="mega-title">מה הבוט צייר?! 🤖🎨</h1>
         <p className="hero-subtitle">
           כל שחקן מקבל מילה סודית בנייד ושולח פרומפט יצירתי, המארח מייצר את התמונה ב-Gemini ומדביק בשנייה,
           וכולם צועקים ניחושים יחד מול המסך הראשי!

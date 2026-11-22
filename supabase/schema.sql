@@ -1,5 +1,5 @@
 -- ============================================================================
--- צייר לי חתול! — Supabase Realtime Schema (Vercel Serverless Ready)
+-- מה הבוט צייר?! — Supabase Realtime Schema (Vercel Serverless Ready)
 -- Run this SQL once in your Supabase project's SQL Editor.
 -- ============================================================================
 

@@ -111,6 +111,16 @@ export default defineConfig({
   plugins: [react(), localDevSyncPlugin()],
   // Support both VITE_* and Vercel's Supabase integration NEXT_PUBLIC_* env vars
   envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          supabase: ['@supabase/supabase-js'],
+        },
+      },
+    },
+  },
   server: {
     port: 3000,
     host: true,

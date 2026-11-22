@@ -60,7 +60,7 @@ export function PlayerMobilePage() {
   const [promptError, setPromptError] = useState('');
   const [personalToast, setPersonalToast] = useState<string | null>(null);
 
-  const lastRoundSyncedRef = useRef<number>(0);
+  const lastSyncedSubIdRef = useRef<string | null>(null);
   const lastScoredSubRef = useRef<string | null>(null);
 
   // Automatic page refresh / reconnect recovery for both /play/:code and /play
@@ -130,12 +130,19 @@ export function PlayerMobilePage() {
     }
   }, [isPromptLocked, isEditingPrompt]);
 
-  // Restore or reset draft cleanly when entering a round (including after page refresh!)
+  // Restore or reset draft cleanly when entering a round or starting a new game in the same room
   useEffect(() => {
+    if (snapshot?.room.phase === 'lobby') {
+      lastSyncedSubIdRef.current = null;
+      lastScoredSubRef.current = null;
+      setPromptDraft('');
+      setIsEditingPrompt(false);
+      return;
+    }
     if (!snapshot || !mySubmission || !activeCode) return;
-    if (lastRoundSyncedRef.current !== snapshot.room.currentRound) {
-      lastRoundSyncedRef.current = snapshot.room.currentRound;
-      const draftKey = `${DRAFT_STORAGE_PREFIX}${activeCode}_${snapshot.room.currentRound}`;
+    if (lastSyncedSubIdRef.current !== mySubmission.id) {
+      lastSyncedSubIdRef.current = mySubmission.id;
+      const draftKey = `${DRAFT_STORAGE_PREFIX}${activeCode}_${mySubmission.id}`;
       const savedDraft = localStorage.getItem(draftKey);
       const initialPrompt = mySubmission.prompt || savedDraft || '';
       setPromptDraft(initialPrompt);
@@ -143,12 +150,12 @@ export function PlayerMobilePage() {
       setHideSecretWord(false);
       setPromptError('');
     }
-  }, [snapshot?.room.currentRound, mySubmission?.id, activeCode, isPromptLocked]);
+  }, [snapshot?.room.phase, mySubmission?.id, activeCode, isPromptLocked]);
 
-  // Persist unsent draft text across accidental mobile reloads
+  // Persist unsent draft text across accidental mobile reloads (scoped per submission ID)
   useEffect(() => {
-    if (!activeCode || !snapshot || snapshot.room.phase !== 'prompting') return;
-    const draftKey = `${DRAFT_STORAGE_PREFIX}${activeCode}_${snapshot.room.currentRound}`;
+    if (!activeCode || !snapshot || snapshot.room.phase !== 'prompting' || !mySubmission) return;
+    const draftKey = `${DRAFT_STORAGE_PREFIX}${activeCode}_${mySubmission.id}`;
     try {
       if (promptDraft) {
         localStorage.setItem(draftKey, promptDraft);
@@ -158,7 +165,7 @@ export function PlayerMobilePage() {
     } catch {
       // ignore
     }
-  }, [promptDraft, activeCode, snapshot?.room.phase, snapshot?.room.currentRound]);
+  }, [promptDraft, activeCode, snapshot?.room.phase, mySubmission?.id]);
 
   // Immediate live forbidden-word detection
   const forbiddenMatches = useMemo(() => {
