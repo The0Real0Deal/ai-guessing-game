@@ -5,6 +5,7 @@ import {
   createRoom,
   getOrderedGuessQueue,
   joinRoom,
+  markPromptCopied,
   nextGuessOrLeaderboard,
   nextRoundOrFinale,
   resetRoomForNewGame,
@@ -72,8 +73,14 @@ describe('End-to-end multiplayer game flow (local sync driver)', () => {
     const round1Words = started.submissions.map((s) => s.secretWord);
     expect(new Set(round1Words).size).toBe(3);
 
-    // 4. Players submit prompts from phones
-    await submitPrompt(code, p1.id, 1, 'פרומפט ראשון מצחיק');
+    // 4. Players submit prompts from phones; p1 edits before lock, then gets locked once Host copies
+    await submitPrompt(code, p1.id, 1, 'פרומפט ראשוני');
+    await submitPrompt(code, p1.id, 1, 'פרומפט ראשון מצחיק ומעודכן');
+    const p1Sub = started.submissions.find((s) => s.playerId === p1.id)!;
+    const afterCopy = await markPromptCopied(code, p1Sub.id);
+    expect(afterCopy.submissions.find((s) => s.id === p1Sub.id)?.copiedAt).not.toBeNull();
+    await expect(submitPrompt(code, p1.id, 1, 'ניסיון עריכה אחרי נעילה')).rejects.toThrow();
+
     await submitPrompt(code, p2.id, 1, 'פרומפט שני צבעוני');
     const afterPrompts = await submitPrompt(code, p3.id, 1, 'פרומפט שלישי מטורף');
     expect(afterPrompts.submissions.every((s) => s.prompt.length > 0)).toBe(true);

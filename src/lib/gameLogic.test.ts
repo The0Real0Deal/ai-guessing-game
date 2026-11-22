@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildGeminiCopyPrompt,
   buildRoundWordDeck,
   calculateRoundPlan,
+  computeRankTrends,
   computeSuperlatives,
+  findForbiddenWords,
+  getHostQueueStatus,
   getRoundCategoryLabel,
   sortPlayersByScore,
 } from './gameLogic';
-import type { Category, Player } from './types';
+import type { Category, Player, Submission } from './types';
 
 function makeCategories(counts: { name: string; count: number }[]): Category[] {
   let idx = 1;
@@ -66,7 +70,7 @@ describe('buildRoundWordDeck', () => {
       { name: 'סרטים', count: 7 },
       { name: 'אוכל', count: 8 },
       { name: 'חיות', count: 6 },
-    ]); // 21 words total, 5 players => 4 rounds, 20 words used, 1 unused
+    ]);
 
     const deck = buildRoundWordDeck(cats, 5);
     expect(deck).toHaveLength(4);
@@ -94,7 +98,7 @@ describe('buildRoundWordDeck', () => {
   });
 });
 
-describe('getRoundCategoryLabel & leaderboard helpers', () => {
+describe('getRoundCategoryLabel, trends & superlatives', () => {
   it('formats single and mixed category labels in Hebrew', () => {
     expect(getRoundCategoryLabel([{ category: 'חיות' }, { category: 'חיות' }])).toBe('חיות');
     expect(getRoundCategoryLabel([{ category: 'חיות' }, { category: 'אוכל' }])).toBe(
@@ -102,7 +106,7 @@ describe('getRoundCategoryLabel & leaderboard helpers', () => {
     );
   });
 
-  it('sorts players by score and computes superlative awards', () => {
+  it('sorts players, computes rank trends, and builds vector superlative awards', () => {
     const players: Player[] = [
       {
         id: 'p1',
@@ -112,8 +116,8 @@ describe('getRoundCategoryLabel & leaderboard helpers', () => {
         score: 5,
         guesserScore: 4,
         creatorScore: 1,
-        prevScore: 3,
-        roundDelta: 2,
+        prevScore: 1, // was rank 2 -> climbed to rank 1
+        roundDelta: 4,
         connected: true,
         joinedAt: '2026-01-01T00:00:00Z',
       },
@@ -125,8 +129,8 @@ describe('getRoundCategoryLabel & leaderboard helpers', () => {
         score: 4,
         guesserScore: 1,
         creatorScore: 3,
-        prevScore: 2,
-        roundDelta: 2,
+        prevScore: 4, // was rank 1 -> dropped to rank 2
+        roundDelta: 0,
         connected: true,
         joinedAt: '2026-01-01T00:00:01Z',
       },
@@ -135,8 +139,63 @@ describe('getRoundCategoryLabel & leaderboard helpers', () => {
     const sorted = sortPlayersByScore(players);
     expect(sorted[0].nickname).toBe('דניאל');
 
+    const trends = computeRankTrends(players);
+    expect(trends[0].player.nickname).toBe('דניאל');
+    expect(trends[0].rankChange).toBe(1);
+    expect(trends[1].player.nickname).toBe('נועה');
+    expect(trends[1].rankChange).toBe(-1);
+
     const awards = computeSuperlatives(players);
     expect(awards.find((a) => a.id === 'picasso')?.winnerNames).toEqual(['נועה']);
     expect(awards.find((a) => a.id === 'sherlock')?.winnerNames).toEqual(['דניאל']);
+  });
+});
+
+describe('findForbiddenWords, buildGeminiCopyPrompt & getHostQueueStatus', () => {
+  it('flags exact and Hebrew-prefixed forbidden words while ignoring stop words', () => {
+    const matches = findForbiddenWords(
+      'חתול על ספה',
+      'איור מצחיק של החתול יושב על כיסא ליד הספה'
+    );
+    expect(matches.map((m) => m.word)).toEqual(['החתול', 'הספה']);
+  });
+
+  it('returns empty array when prompt contains no forbidden words', () => {
+    const matches = findForbiddenWords('חתול עורך דין', 'יצור פרוותי עם חליפה בבית משפט');
+    expect(matches).toEqual([]);
+  });
+
+  it('wraps copied prompt with צור קריקטורה של prefix', () => {
+    expect(buildGeminiCopyPrompt('  כלב רוקד סלסה  ')).toBe('צור קריקטורה של כלב רוקד סלסה');
+  });
+
+  it('returns accurate ordered host queue statuses', () => {
+    const base: Submission = {
+      id: 's1',
+      roomCode: '1234',
+      roundNumber: 1,
+      playerId: 'p1',
+      category: 'חיות',
+      secretWord: 'חתול',
+      prompt: '',
+      promptSubmittedAt: null,
+      copiedAt: null,
+      imageData: null,
+      imageSizeKb: null,
+      orderIndex: 0,
+      guessedCorrectly: false,
+      guesserId: null,
+      revealed: false,
+      awardedCreatorPts: 0,
+      awardedGuesserPts: 0,
+      updatedAt: '',
+    };
+
+    expect(getHostQueueStatus(base).label).toBe('ממתין לפרומפט');
+    expect(getHostQueueStatus({ ...base, prompt: 'יצור חמוד' }).label).toBe('מוכן להעתקה');
+    const copied = getHostQueueStatus({ ...base, prompt: 'יצור חמוד', copiedAt: '2026-01-01T00:00:00Z' });
+    expect(copied.isCopied).toBe(true);
+    expect(getHostQueueStatus({ ...base, prompt: 'יצור חמוד', imageData: 'data:image/webp;base64,X' }).label).toBe('הודבקה תמונה');
+    expect(getHostQueueStatus({ ...base, prompt: 'יצור חמוד', imageData: 'data:image/webp;base64,X', revealed: true }).label).toBe('הסתיים');
   });
 });

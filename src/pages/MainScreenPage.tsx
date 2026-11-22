@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { Pause, UserPlus } from 'lucide-react';
 import { AnimatedLeaderboard } from '../components/AnimatedLeaderboard';
 import { GrandFinaleStage } from '../components/GrandFinaleStage';
 import { QRCodeCard } from '../components/QRCodeCard';
@@ -20,12 +21,24 @@ import {
 import { getOrderedGuessQueue } from '../lib/gameService';
 import type { BroadcastEvent } from '../lib/types';
 
+interface LobbyJoinFeedItem {
+  id: string;
+  nickname: string;
+  avatar: string;
+  joinedAt: number;
+}
+
 export function MainScreenPage() {
   const { code } = useParams<{ code?: string }>();
   const navigate = useNavigate();
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [wittyIndex, setWittyIndex] = useState(0);
+  const [revealStage, setRevealStage] = useState<0 | 1 | 2>(0);
+  const [joinFeed, setJoinFeed] = useState<LobbyJoinFeedItem[]>([]);
+
   const lastRevealedIdRef = useRef<string | null>(null);
+  const seenPlayerIdsRef = useRef<Set<string>>(new Set());
+  const initializedLobbyRef = useRef(false);
 
   const handleBroadcastEvent = useCallback((evt: BroadcastEvent) => {
     if (evt.type === 'confetti') {
@@ -36,6 +49,33 @@ export function MainScreenPage() {
   }, []);
 
   const { snapshot, loading, error } = useRoom(code, handleBroadcastEvent);
+
+  // Track real-time lobby joins for the animated Live Lobby Join Feed
+  useEffect(() => {
+    if (!snapshot) return;
+    const connected = snapshot.players.filter((p) => p.connected);
+
+    if (!initializedLobbyRef.current) {
+      connected.forEach((p) => seenPlayerIdsRef.current.add(p.id));
+      initializedLobbyRef.current = true;
+      return;
+    }
+
+    const newlyJoined = connected.filter((p) => !seenPlayerIdsRef.current.has(p.id));
+    if (newlyJoined.length > 0) {
+      newlyJoined.forEach((p) => seenPlayerIdsRef.current.add(p.id));
+      const now = Date.now();
+      setJoinFeed((prev) => [
+        ...newlyJoined.map((p) => ({
+          id: `${p.id}_${now}`,
+          nickname: p.nickname,
+          avatar: p.avatar,
+          joinedAt: now,
+        })),
+        ...prev,
+      ].slice(0, 4));
+    }
+  }, [snapshot?.players]);
 
   // Rotate witty Hebrew waiting lines during prompting phase
   useEffect(() => {
@@ -50,21 +90,38 @@ export function MainScreenPage() {
   const currentGuess =
     snapshot?.room.phase === 'guessing' ? queue[snapshot.room.currentGuessIndex] || null : null;
 
-  // Trigger reveal confetti on transition to revealed (in case broadcast arrived before state)
+  // Staged Reveal choreography: Stage 1 (concept + credits) immediately -> Stage 2 (exact prompt) after 1.7s
   useEffect(() => {
-    if (currentGuess?.revealed && currentGuess.guessedCorrectly) {
-      if (lastRevealedIdRef.current !== currentGuess.id) {
-        lastRevealedIdRef.current = currentGuess.id;
-        fireRevealConfetti();
-      }
+    if (!currentGuess?.revealed) {
+      setRevealStage(0);
+      return;
     }
+
+    setRevealStage(1);
+    if (currentGuess.guessedCorrectly && lastRevealedIdRef.current !== currentGuess.id) {
+      lastRevealedIdRef.current = currentGuess.id;
+      fireRevealConfetti();
+    }
+
+    const promptRevealTimer = window.setTimeout(() => {
+      setRevealStage(2);
+    }, 1700);
+
+    return () => window.clearTimeout(promptRevealTimer);
   }, [currentGuess?.id, currentGuess?.revealed, currentGuess?.guessedCorrectly]);
 
-  const { remaining, isUrgent, progressPct } = useCountdown(
+  const { remaining, isRunning, isUrgent, progressPct } = useCountdown(
     snapshot?.room.timerEndsAt || null,
     snapshot?.room.timerPausedRemaining ?? null,
     snapshot?.room.settings.timerSeconds || 60
   );
+
+  const isTimerPaused =
+    Boolean(snapshot?.room.phase === 'guessing') &&
+    !isRunning &&
+    snapshot?.room.timerPausedRemaining !== null &&
+    remaining > 0 &&
+    !currentGuess?.revealed;
 
   // If no code in URL yet -> show clean attach screen
   if (!code) {
@@ -142,6 +199,7 @@ export function MainScreenPage() {
   const { room, players, submissions } = snapshot;
   const connectedPlayers = players.filter((p) => p.connected);
   const joinUrl = `${window.location.origin}/play/${room.code}`;
+  const shortJoinUrl = `${window.location.host}/play/${room.code}`;
   const roundPlan = calculateRoundPlan(room.settings.categories, connectedPlayers.length);
   const roundSubs = submissions.filter((s) => s.roundNumber === room.currentRound);
   const progress = getSubmissionProgress(submissions, room.currentRound);
@@ -165,7 +223,9 @@ export function MainScreenPage() {
 
         <div className="tv-meta-pills">
           {room.currentCategory && room.phase !== 'lobby' && room.phase !== 'finale' && (
-            <span className="meta-sticker meta-blue">קטגוריה: <strong>{room.currentCategory}</strong></span>
+            <span className="meta-sticker meta-blue">
+              קטגוריה: <strong>{room.currentCategory}</strong>
+            </span>
           )}
           {room.phase !== 'lobby' && room.totalRounds > 0 && (
             <span className="meta-sticker meta-coral">
@@ -179,18 +239,23 @@ export function MainScreenPage() {
       </header>
 
       <main className="tv-stage">
-        {/* PHASE 1: LOBBY */}
+        {/* PHASE 1: LOBBY WITH PROMINENT QR + SHORT URL + LIVE JOIN FEED */}
         {room.phase === 'lobby' && (
           <div className="tv-lobby-layout">
             <div className="stage-card tv-lobby-hero">
               <div className="tv-lobby-info">
-                <div className="sticker-tag tag-yellow">הצטרפו עכשיו מהטלפון! 📱</div>
-                <h1 className="tv-join-heading">סרקו את הקוד או היכנסו לכתובת</h1>
+                <div className="sticker-tag tag-yellow">הצטרפו עכשיו מהטלפון!</div>
+                <h1 className="tv-join-heading">סרקו את ה-QR או היכנסו לכתובת המקוצרת</h1>
+
                 <div className="tv-code-row">
                   <span className="tv-code-label">קוד חדר:</span>
                   <span className="room-code-digits" dir="ltr">{room.code}</span>
                 </div>
-                <div className="tv-url-pill" dir="ltr">{joinUrl}</div>
+
+                <div className="tv-short-url-box">
+                  <span className="short-url-label">כתובת מהירה:</span>
+                  <span className="tv-short-url-value" dir="ltr">{shortJoinUrl}</span>
+                </div>
 
                 <div className="tv-stats-strip">
                   <div className="stat-chip">
@@ -210,14 +275,26 @@ export function MainScreenPage() {
                 </div>
               </div>
 
-              <QRCodeCard url={joinUrl} size={235} caption="סרקו עם המצלמה והיכנסו!" />
+              <QRCodeCard url={joinUrl} size={260} caption="סרקו עם המצלמה והיכנסו מיד!" />
             </div>
+
+            {/* Live Lobby Join Feed Ticker */}
+            {joinFeed.length > 0 && (
+              <div className="live-join-feed" aria-live="polite">
+                {joinFeed.map((item) => (
+                  <div key={item.id} className="join-feed-pill pop-in">
+                    <UserPlus size={15} strokeWidth={2.6} />
+                    <span>
+                      {item.avatar} <strong>{item.nickname}</strong> הצטרף/ה לחדר!
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="stage-card tv-players-panel">
               <div className="panel-title-row">
-                <h2>
-                  שחקנים בלובי ({connectedPlayers.length})
-                </h2>
+                <h2>שחקנים בלובי ({connectedPlayers.length})</h2>
                 <span className="waiting-inline">
                   <span className="pulse-dot" />
                   ממתינים שהמארח יזניק את המשחק...
@@ -227,7 +304,7 @@ export function MainScreenPage() {
               {connectedPlayers.length === 0 ? (
                 <div className="empty-lobby-box">
                   <span className="empty-emoji" aria-hidden="true">👀</span>
-                  <p>הבמה מוכנה! סרקו את ה-QR כדי להיות הראשונים בחדר</p>
+                  <p>הבמה מוכנה! סרקו את ה-QR או הקלידו {shortJoinUrl} כדי להצטרף</p>
                 </div>
               ) : (
                 <div className="tv-players-grid">
@@ -235,7 +312,7 @@ export function MainScreenPage() {
                     <div
                       key={p.id}
                       className="tv-player-card pop-in"
-                      style={{ animationDelay: `${idx * 60}ms` }}
+                      style={{ animationDelay: `${Math.min(idx, 10) * 55}ms` }}
                     >
                       <span className="tv-player-avatar">{p.avatar}</span>
                       <span className="tv-player-name">{p.nickname}</span>
@@ -300,7 +377,7 @@ export function MainScreenPage() {
           </div>
         )}
 
-        {/* PHASE 3: GUESSING STAGE */}
+        {/* PHASE 3: GUESSING STAGE WITH STAGED REVEAL & PAUSE INDICATOR */}
         {room.phase === 'guessing' && currentGuess && (
           <div className="tv-guessing-layout">
             <div className="tv-guessing-top">
@@ -308,21 +385,24 @@ export function MainScreenPage() {
                 תמונה <strong>{room.currentGuessIndex + 1}</strong> מתוך <strong>{queue.length}</strong>
               </div>
 
-              <div className="category-hero-pill">
-                🏷️ {currentGuess.category}
-              </div>
+              <div className="category-hero-pill">🏷️ {currentGuess.category}</div>
 
-              <div className={`timer-pill-lg ${isUrgent ? 'urgent' : ''}`}>
-                <span>⏱️</span>
+              <div
+                className={`timer-pill-lg ${isUrgent ? 'urgent' : ''} ${
+                  isTimerPaused ? 'is-paused' : ''
+                }`}
+              >
+                {isTimerPaused ? <Pause size={22} strokeWidth={2.8} /> : <span>⏱️</span>}
                 <strong dir="ltr">{remaining}</strong>
-                <span>שנ׳</span>
+                <span>{isTimerPaused ? 'מושהה' : 'שנ׳'}</span>
               </div>
             </div>
 
-            {/* Smooth countdown progress rail */}
             <div className="timer-rail">
               <div
-                className={`timer-rail-fill ${isUrgent ? 'urgent' : ''}`}
+                className={`timer-rail-fill ${isUrgent ? 'urgent' : ''} ${
+                  isTimerPaused ? 'is-paused' : ''
+                }`}
                 style={{ width: `${progressPct}%` }}
               />
             </div>
@@ -335,27 +415,28 @@ export function MainScreenPage() {
                 className="tv-guess-image zoom-in"
               />
 
-              {/* Dramatic Reveal Banner when Host marks guesser or reveals */}
-              {currentGuess.revealed && (
+              {/* Staged Reveal Overlay: Stage 1 = Concept & Credits -> Stage 2 = Exact Prompt */}
+              {currentGuess.revealed && revealStage >= 1 && (
                 <div
                   className={`tv-reveal-overlay ${
                     currentGuess.guessedCorrectly ? 'is-hit' : 'is-miss'
                   }`}
                 >
                   <div className="reveal-pill">
-                    {currentGuess.guessedCorrectly ? hitBadge : '⏱️ חשיפת התשובה!'}
+                    {currentGuess.guessedCorrectly ? hitBadge : '⏱️ חשיפת המושג!'}
                   </div>
 
-                  <div className="reveal-secret-word">{currentGuess.secretWord}</div>
+                  <div className="reveal-stage-label">המושג הסודי היה:</div>
+                  <div className="reveal-secret-word pop-in">{currentGuess.secretWord}</div>
 
                   {!currentGuess.guessedCorrectly && (
                     <p className="reveal-miss-roast">{missLine}</p>
                   )}
 
-                  <div className="reveal-credits-row">
+                  <div className="reveal-credits-row pop-in">
                     {creator && (
                       <div className="credit-card credit-creator">
-                        <span className="credit-role">🎨 היוצר/ת</span>
+                        <span className="credit-role">יוצר/ת</span>
                         <span className="credit-person">
                           {creator.avatar} {creator.nickname}
                         </span>
@@ -369,7 +450,7 @@ export function MainScreenPage() {
 
                     {guesser && (
                       <div className="credit-card credit-guesser">
-                        <span className="credit-role">🔍 המנחש/ת</span>
+                        <span className="credit-role">מנחש/ת</span>
                         <span className="credit-person">
                           {guesser.avatar} {guesser.nickname}
                         </span>
@@ -382,25 +463,37 @@ export function MainScreenPage() {
                     )}
                   </div>
 
+                  {/* Stage 2: Exact Player Prompt Reveal */}
                   {currentGuess.prompt && (
-                    <div className="reveal-prompt-bubble">
-                      <span className="prompt-label">הפרומפט המקורי:</span>
-                      <span className="prompt-quote">״{currentGuess.prompt}״</span>
-                    </div>
+                    revealStage >= 2 ? (
+                      <div className="reveal-prompt-bubble staged-prompt-in">
+                        <span className="prompt-label">הפרומפט המדויק שהשחקן כתב:</span>
+                        <span className="prompt-quote">״{currentGuess.prompt}״</span>
+                      </div>
+                    ) : (
+                      <div className="reveal-prompt-pending">
+                        <span className="pulse-dot" />
+                        <span>חושפים את הפרומפט המקורי...</span>
+                      </div>
+                    )
                   )}
                 </div>
               )}
             </div>
 
             {!currentGuess.revealed && (
-              <div className="tv-guess-cta">
-                <span>🗣️ צעקו את הניחוש שלכם בקול רם! מי הראשון שיעלה על המילה?</span>
+              <div className={`tv-guess-cta ${isTimerPaused ? 'is-paused' : ''}`}>
+                <span>
+                  {isTimerPaused
+                    ? '⏸️ הטיימר מושהה כרגע — קחו נשימה והמשיכו תכף!'
+                    : '🗣️ צעקו את הניחוש שלכם בקול רם! מי הראשון שיעלה על המושג?'}
+                </span>
               </div>
             )}
           </div>
         )}
 
-        {/* PHASE 4: END-OF-ROUND ANIMATED LEADERBOARD */}
+        {/* PHASE 4: END-OF-ROUND ANIMATED LEADERBOARD WITH TREND INDICATORS */}
         {room.phase === 'round_leaderboard' && (
           <div className="tv-leaderboard-wrap">
             <AnimatedLeaderboard
@@ -412,7 +505,7 @@ export function MainScreenPage() {
           </div>
         )}
 
-        {/* PHASE 5: GRAND FINALE */}
+        {/* PHASE 5: GRAND FINALE (ZERO EMOJIS, VECTOR/TYPOGRAPHIC + HIGHLIGHTS) */}
         {room.phase === 'finale' && (
           <GrandFinaleStage players={players} history={room.history} />
         )}

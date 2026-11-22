@@ -1,6 +1,8 @@
 import type {
   Category,
+  ForbiddenMatch,
   Player,
+  PlayerRankTrend,
   RoundCalculation,
   Submission,
   SuperlativeAward,
@@ -315,11 +317,10 @@ export function computeSuperlatives(players: Player[]): SuperlativeAward[] {
     const winners = players.filter((p) => p.creatorScore === maxCreator);
     awards.push({
       id: 'picasso',
-      emoji: '🎨',
+      icon: 'palette',
       title: 'פיקאסו של הפרומפטים',
-      subtitle: 'הכי הרבה תמונות שפוצחו בהצלחה!',
+      subtitle: 'הכי הרבה יצירות שפוצחו בהצלחה בסלון',
       winnerNames: winners.map((w) => w.nickname),
-      winnerAvatars: winners.map((w) => w.avatar),
       statLabel: `${maxCreator} נק׳ יוצר`,
     });
   }
@@ -329,11 +330,10 @@ export function computeSuperlatives(players: Player[]): SuperlativeAward[] {
     const winners = players.filter((p) => p.guesserScore === maxGuesser);
     awards.push({
       id: 'sherlock',
-      emoji: '🔍',
-      title: 'שרלוק הולמס של הסלון',
-      subtitle: 'העין הכי חדה והפה הכי מהיר בחדר!',
+      icon: 'search',
+      title: 'שרלוק הולמס של הערב',
+      subtitle: 'העין הכי חדה והתגובה הכי מהירה בחדר',
       winnerNames: winners.map((w) => w.nickname),
-      winnerAvatars: winners.map((w) => w.avatar),
       statLabel: `${maxGuesser} נק׳ מנחש`,
     });
   }
@@ -344,16 +344,128 @@ export function computeSuperlatives(players: Player[]): SuperlativeAward[] {
     const sweet = players.filter((p) => p.score === lowest);
     awards.push({
       id: 'abstract',
-      emoji: '🌀',
+      icon: 'sparkles',
       title: 'פרס האמנות המופשטת',
-      subtitle: 'היצירות היו פשוט מקדימות את זמנן...',
+      subtitle: 'יצירות שהיו פשוט מקדימות את זמנן',
       winnerNames: sweet.map((w) => w.nickname),
-      winnerAvatars: sweet.map((w) => w.avatar),
-      statLabel: `${lowest} נק׳ — והכי הרבה סטייל`,
+      statLabel: `${lowest} נק׳ — ומקסימום יצירתיות`,
     });
   }
 
   return awards;
+}
+
+/**
+ * Computes current rank, previous rank (before the latest round), and rankChange
+ * so inter-round leaderboards can display climb/drop trend indicators.
+ */
+export function computeRankTrends(players: Player[]): PlayerRankTrend[] {
+  const sortedCurrent = sortPlayersByScore(players);
+  const sortedPrev = [...players].sort((a, b) => {
+    if (b.prevScore !== a.prevScore) return b.prevScore - a.prevScore;
+    return a.nickname.localeCompare(b.nickname, 'he');
+  });
+
+  const prevRankMap = new Map<string, number>();
+  sortedPrev.forEach((p, idx) => {
+    // Players with identical prevScore share the same previous rank
+    if (idx > 0 && sortedPrev[idx - 1].prevScore === p.prevScore) {
+      prevRankMap.set(p.id, prevRankMap.get(sortedPrev[idx - 1].id)!);
+    } else {
+      prevRankMap.set(p.id, idx + 1);
+    }
+  });
+
+  return sortedCurrent.map((player, idx) => {
+    const currentRank = idx + 1;
+    const prevRank = prevRankMap.get(player.id) ?? currentRank;
+    return {
+      player,
+      currentRank,
+      prevRank,
+      rankChange: prevRank - currentRank,
+    };
+  });
+}
+
+const HEBREW_STOP_WORDS = new Set([
+  'של', 'על', 'עם', 'את', 'אל', 'מן', 'גם', 'או', 'לא', 'זה', 'זו', 'זאת', 'בתוך', 'בלי', 'עד', 'כמו',
+]);
+
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Extracts meaningful forbidden tokens from the player's secret target concept
+ * and returns every offending span in the player's prompt (including Hebrew prefixes ה/ב/ל/מ/ו/כ/ש).
+ */
+export function findForbiddenWords(secretWord: string, prompt: string): ForbiddenMatch[] {
+  if (!secretWord.trim() || !prompt.trim()) return [];
+
+  const rawTokens = secretWord
+    .split(/[\s,.;:!?()[\]{}"'״׳\-–—/\\]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2);
+
+  const meaningfulTokens = rawTokens.filter((t) => !HEBREW_STOP_WORDS.has(t));
+  const forbiddenTokens = meaningfulTokens.length > 0 ? meaningfulTokens : rawTokens;
+  if (forbiddenTokens.length === 0) return [];
+
+  const matches: ForbiddenMatch[] = [];
+  const tokenRegex = /[\u0590-\u05FFA-Za-z0-9״׳']+/g;
+  let m: RegExpExecArray | null;
+
+  while ((m = tokenRegex.exec(prompt)) !== null) {
+    const rawToken = m[0];
+    const normalized = rawToken.toLowerCase();
+
+    for (const forbidden of forbiddenTokens) {
+      const fNorm = forbidden.toLowerCase();
+      // Direct match or Hebrew single-letter prefix (ה, ב, ל, מ, ו, כ, ש) + forbidden word
+      const isHebrew = /[\u0590-\u05FF]/.test(fNorm);
+      const pattern = isHebrew
+        ? new RegExp(`^[הובכלמש]?${escapeRegExp(fNorm)}$`, 'i')
+        : new RegExp(`^${escapeRegExp(fNorm)}s?$`, 'i');
+
+      if (pattern.test(normalized)) {
+        matches.push({
+          word: rawToken,
+          start: m.index,
+          end: m.index + rawToken.length,
+        });
+        break;
+      }
+    }
+  }
+
+  return matches;
+}
+
+export function buildGeminiCopyPrompt(playerPrompt: string): string {
+  return `צור קריקטורה של ${playerPrompt.trim()}`;
+}
+
+export type HostQueueStatusKey = 'waiting' | 'ready_to_copy' | 'image_pasted' | 'finished';
+
+export interface HostQueueStatus {
+  key: HostQueueStatusKey;
+  label: string;
+  isCopied: boolean;
+}
+
+export function getHostQueueStatus(sub: Submission): HostQueueStatus {
+  const isCopied = Boolean(sub.copiedAt);
+  if (sub.revealed) {
+    return { key: 'finished', label: 'הסתיים', isCopied };
+  }
+  if (sub.imageData) {
+    return { key: 'image_pasted', label: 'הודבקה תמונה', isCopied };
+  }
+  if (sub.prompt.trim().length > 0) {
+    return { key: 'ready_to_copy', label: 'מוכן להעתקה', isCopied };
+  }
+  return { key: 'waiting', label: 'ממתין לפרומפט', isCopied };
 }
 
 export function getSubmissionProgress(submissions: Submission[], roundNumber: number) {

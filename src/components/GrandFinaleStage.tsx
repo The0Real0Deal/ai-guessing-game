@@ -1,13 +1,46 @@
 import { useEffect, useState } from 'react';
+import {
+  Award,
+  CheckCircle2,
+  Clock,
+  Crown,
+  Flame,
+  Images,
+  Palette,
+  Search,
+  Sparkles,
+  Trophy,
+} from 'lucide-react';
 import { fireGrandFinaleConfetti } from '../lib/confetti';
 import { computeSuperlatives, sortPlayersByScore } from '../lib/gameLogic';
-import type { Player, RoundHistoryItem } from '../lib/types';
+import type { AwardIconKey, Player, RoundHistoryItem } from '../lib/types';
 
 interface GrandFinaleStageProps {
   players: Player[];
   history: RoundHistoryItem[];
   compact?: boolean;
   highlightPlayerId?: string;
+}
+
+function renderAwardIcon(icon: AwardIconKey) {
+  switch (icon) {
+    case 'palette':
+      return <Palette size={28} strokeWidth={2.4} />;
+    case 'search':
+      return <Search size={28} strokeWidth={2.4} />;
+    case 'sparkles':
+      return <Sparkles size={28} strokeWidth={2.4} />;
+  }
+}
+
+function getMonogram(name: string): string {
+  const clean = name.trim();
+  if (!clean) return '?';
+  const parts = clean.split(/\s+/);
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  }
+  return clean.slice(0, 2).toUpperCase();
 }
 
 export function GrandFinaleStage({
@@ -26,16 +59,25 @@ export function GrandFinaleStage({
   const podium = sorted.slice(0, 3);
   const awards = computeSuperlatives(players);
 
+  // Compute End-of-Game Highlights ("רגעי השיא")
+  const topGuesser = [...players].sort((a, b) => b.guesserScore - a.guesserScore)[0];
+  const topCreator = [...players].sort((a, b) => b.creatorScore - a.creatorScore)[0];
+  const guessedCount = history.filter((h) => h.guessedCorrectly).length;
+  const totalImages = history.length;
+  const solveRate = totalImages > 0 ? Math.round((guessedCount / totalImages) * 100) : 0;
+
   useEffect(() => {
-    const t1 = window.setTimeout(() => setRevealStep(1), 300);
-    const t2 = window.setTimeout(() => setRevealStep(2), 950);
-    const t3 = window.setTimeout(() => setRevealStep(3), 1650);
+    const t1 = window.setTimeout(() => setRevealStep(1), 260);
+    const t2 = window.setTimeout(() => setRevealStep(2), 820);
+    const t3 = window.setTimeout(() => setRevealStep(3), 1450);
+    const t4 = window.setTimeout(() => setRevealStep(4), 2100);
     const stopConfetti = !compact ? fireGrandFinaleConfetti() : () => {};
 
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
       window.clearTimeout(t3);
+      window.clearTimeout(t4);
       stopConfetti();
     };
   }, [compact]);
@@ -44,77 +86,141 @@ export function GrandFinaleStage({
 
   return (
     <div className={`finale-stage ${compact ? 'is-compact' : ''}`}>
+      {/* Winner Hero (Pure Vector & Typographic — Zero Emojis) */}
       <div className="finale-hero">
-        <div className="crown-bounce" aria-hidden="true">👑</div>
-        <div className="sticker-tag tag-yellow">הגמר הגדול! 🏆</div>
+        <div className="finale-crown-badge" aria-hidden="true">
+          <Crown size={44} strokeWidth={2.5} />
+        </div>
+        <div className="sticker-tag tag-yellow">הגמר הגדול — הכרזת הזוכים</div>
         <h1 className="finale-title">
           {isTie
-            ? `תיקו אגדי בצמרת! ${champNames}!`
-            : `${champNames} — אלוף/ת הערב!`}
+            ? `תיקו אגדי בצמרת: ${champNames}`
+            : `${champNames} — אלוף הערב!`}
         </h1>
         <p className="finale-roast">
           {topScore === 0
-            ? 'טוב, כולם סיימו עם 0 נקודות... אז המנצח האמיתי של הערב הוא Gemini! 🤖'
+            ? 'כולם סיימו עם 0 נקודות — כנראה שהמנצח האמיתי של הערב הוא Gemini.'
             : isTie
-            ? 'שני מוחות גאוניים (או סתם המון מזל) חולקים את הכתר עם כבוד אינסופי! 🎊'
-            : `עם ${topScore} נקודות ומוח חד יותר מפרומפט של 500 מילה — תנו מחיאות כפיים סוערות! 👏🔥`}
+            ? 'שני מוחות גאוניים (או תיאום מושלם) חולקים את המקום הראשון בכבוד רב.'
+            : `עם ${topScore} נקודות ומוח חד יותר מפרומפט של 500 מילה — קבלו את הזוכה של הערב!`}
         </p>
       </div>
 
-      {/* Dramatic Podium */}
+      {/* Choreographed 3-Place Podium */}
       {podium.length > 0 && (
         <div className="podium-grid">
-          {/* Second Place */}
           {podium[1] && (
             <div className={`podium-slot slot-2 ${revealStep >= 2 ? 'revealed' : ''}`}>
-              <div className="podium-avatar">{podium[1].avatar}</div>
+              <div className="podium-monogram monogram-2">{getMonogram(podium[1].nickname)}</div>
               <div className="podium-name">
                 {podium[1].nickname}
                 {highlightPlayerId === podium[1].id && <span className="me-pill">את/ה</span>}
               </div>
               <div className="podium-score">{podium[1].score} נק׳</div>
-              <div className="podium-pillar pillar-2">🥈 2</div>
+              <div className="podium-pillar pillar-2">
+                <span className="pillar-rank">2</span>
+              </div>
             </div>
           )}
 
-          {/* First Place */}
           <div className={`podium-slot slot-1 ${revealStep >= 3 ? 'revealed' : ''}`}>
-            <div className="podium-crown" aria-hidden="true">👑</div>
-            <div className="podium-avatar avatar-winner">{podium[0].avatar}</div>
+            <div className="podium-crown-icon" aria-hidden="true">
+              <Crown size={30} strokeWidth={2.6} />
+            </div>
+            <div className="podium-monogram monogram-1">{getMonogram(podium[0].nickname)}</div>
             <div className="podium-name">
               {podium[0].nickname}
               {highlightPlayerId === podium[0].id && <span className="me-pill">את/ה</span>}
             </div>
             <div className="podium-score score-winner">{podium[0].score} נק׳</div>
-            <div className="podium-pillar pillar-1">🥇 1</div>
+            <div className="podium-pillar pillar-1">
+              <Trophy size={26} strokeWidth={2.5} />
+              <span className="pillar-rank">1</span>
+            </div>
           </div>
 
-          {/* Third Place */}
           {podium[2] && (
             <div className={`podium-slot slot-3 ${revealStep >= 1 ? 'revealed' : ''}`}>
-              <div className="podium-avatar">{podium[2].avatar}</div>
+              <div className="podium-monogram monogram-3">{getMonogram(podium[2].nickname)}</div>
               <div className="podium-name">
                 {podium[2].nickname}
                 {highlightPlayerId === podium[2].id && <span className="me-pill">את/ה</span>}
               </div>
               <div className="podium-score">{podium[2].score} נק׳</div>
-              <div className="podium-pillar pillar-3">🥉 3</div>
+              <div className="podium-pillar pillar-3">
+                <span className="pillar-rank">3</span>
+              </div>
             </div>
           )}
         </div>
       )}
 
-      {/* Humorous Superlative Awards */}
+      {/* End-of-Game Highlights Summary ("רגעי השיא") */}
+      <section className={`highlights-section ${revealStep >= 4 ? 'revealed' : ''}`}>
+        <div className="highlights-header">
+          <Flame size={22} strokeWidth={2.5} />
+          <h2>רגעי השיא</h2>
+        </div>
+
+        <div className="highlights-grid">
+          <div className="highlight-card hl-guesser">
+            <div className="hl-icon-box">
+              <Search size={24} strokeWidth={2.5} />
+            </div>
+            <div className="hl-label">המנחש המצטיין</div>
+            <div className="hl-value">
+              {topGuesser && topGuesser.guesserScore > 0 ? topGuesser.nickname : '—'}
+            </div>
+            <div className="hl-stat">
+              {topGuesser && topGuesser.guesserScore > 0
+                ? `${topGuesser.guesserScore} נק׳ מניחושים נכונים`
+                : 'טרם נצברו ניחושים'}
+            </div>
+          </div>
+
+          <div className="highlight-card hl-creator">
+            <div className="hl-icon-box">
+              <Palette size={24} strokeWidth={2.5} />
+            </div>
+            <div className="hl-label">יוצר הפרומפטים המצטיין</div>
+            <div className="hl-value">
+              {topCreator && topCreator.creatorScore > 0 ? topCreator.nickname : '—'}
+            </div>
+            <div className="hl-stat">
+              {topCreator && topCreator.creatorScore > 0
+                ? `${topCreator.creatorScore} נק׳ מתמונות שפוצחו`
+                : 'טרם נצברו נקודות יוצר'}
+            </div>
+          </div>
+
+          <div className="highlight-card hl-rate">
+            <div className="hl-icon-box">
+              <Award size={24} strokeWidth={2.5} />
+            </div>
+            <div className="hl-label">מדד פיצוח קבוצתי</div>
+            <div className="hl-value" dir="ltr">
+              {solveRate}%
+            </div>
+            <div className="hl-stat">
+              {guessedCount} מתוך {totalImages} יצירות נוחשו בהצלחה
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Humorous Superlative Titles (Vector Icons Only) */}
       {awards.length > 0 && (
         <div className="awards-grid">
           {awards.map((award) => (
             <div key={award.id} className="award-card">
-              <div className="award-emoji" aria-hidden="true">{award.emoji}</div>
+              <div className="award-icon-badge" aria-hidden="true">
+                {renderAwardIcon(award.icon)}
+              </div>
               <div className="award-title">{award.title}</div>
               <div className="award-winners">
-                {award.winnerAvatars.map((av, i) => (
+                {award.winnerNames.map((name, i) => (
                   <span key={i} className="award-winner-chip">
-                    {av} {award.winnerNames[i]}
+                    {name}
                   </span>
                 ))}
               </div>
@@ -125,7 +231,7 @@ export function GrandFinaleStage({
         </div>
       )}
 
-      {/* Full Standings */}
+      {/* Full Standings beyond Top 3 */}
       {sorted.length > 3 && (
         <div className="stage-card finale-rest-card">
           <h3>שאר המשתתפים המכובדים</h3>
@@ -133,10 +239,10 @@ export function GrandFinaleStage({
             {sorted.slice(3).map((p, idx) => (
               <div key={p.id} className="finale-rest-row">
                 <span>
-                  #{idx + 4} {p.avatar} <strong>{p.nickname}</strong>
+                  #{idx + 4} <strong>{p.nickname}</strong>
                 </span>
                 <span className="finale-rest-pts">
-                  {p.score} נק׳ (🔍 {p.guesserScore} | 🎨 {p.creatorScore})
+                  {p.score} נק׳ (מנחש: {p.guesserScore} | יוצר: {p.creatorScore})
                 </span>
               </div>
             ))}
@@ -152,9 +258,12 @@ export function GrandFinaleStage({
             className="btn-brutal btn-blue btn-lg"
             onClick={() => setShowGallery((v) => !v)}
           >
-            {showGallery
-              ? '🙈 הסתר גלריית יצירות'
-              : `🖼️ פתח את מוזיאון הערב (${history.length} יצירות)`}
+            <Images size={20} />
+            <span>
+              {showGallery
+                ? 'הסתר גלריית יצירות'
+                : `פתח את מוזיאון הערב (${history.length} יצירות)`}
+            </span>
           </button>
 
           {showGallery && (
@@ -165,16 +274,22 @@ export function GrandFinaleStage({
                     <img src={item.imageData} alt={item.secretWord} loading="lazy" />
                     <span className="gallery-cat-badge">{item.category}</span>
                     <span className={`gallery-status-badge ${item.guessedCorrectly ? 'hit' : 'miss'}`}>
-                      {item.guessedCorrectly ? '✅ ניחשו!' : '😅 לא נוחש'}
+                      {item.guessedCorrectly ? (
+                        <>
+                          <CheckCircle2 size={13} /> נוחש בהצלחה
+                        </>
+                      ) : (
+                        <>
+                          <Clock size={13} /> לא נוחש
+                        </>
+                      )}
                     </span>
                   </div>
                   <div className="gallery-body">
                     <div className="gallery-word">{item.secretWord}</div>
                     <div className="gallery-meta">
-                      <span>🎨 {item.creatorAvatar} {item.creatorNickname}</span>
-                      {item.guesserNickname && (
-                        <span>🔍 {item.guesserAvatar} {item.guesserNickname}</span>
-                      )}
+                      <span>יוצר: {item.creatorNickname}</span>
+                      {item.guesserNickname && <span>• מנחש: {item.guesserNickname}</span>}
                     </div>
                     {item.prompt && (
                       <blockquote className="gallery-prompt">״{item.prompt}״</blockquote>

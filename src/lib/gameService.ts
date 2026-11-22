@@ -62,6 +62,7 @@ interface SubmissionRow {
   secret_word: string;
   prompt: string;
   prompt_submitted_at: string | null;
+  copied_at: string | null;
   image_data: string | null;
   image_size_kb: number | null;
   order_index: number;
@@ -117,6 +118,7 @@ function mapSubmissionRow(s: SubmissionRow): Submission {
     secretWord: s.secret_word,
     prompt: s.prompt || '',
     promptSubmittedAt: s.prompt_submitted_at || null,
+    copiedAt: s.copied_at || null,
     imageData: s.image_data || null,
     imageSizeKb: s.image_size_kb ?? null,
     orderIndex: s.order_index ?? 0,
@@ -680,6 +682,7 @@ export async function startGame(code: string): Promise<RoomSnapshot> {
     secretWord: round1Words[idx].word,
     prompt: '',
     promptSubmittedAt: null,
+    copiedAt: null,
     imageData: null,
     imageSizeKb: null,
     orderIndex: idx,
@@ -710,6 +713,7 @@ export async function startGame(code: string): Promise<RoomSnapshot> {
         secret_word: s.secretWord,
         prompt: '',
         prompt_submitted_at: null,
+        copied_at: null,
         image_data: null,
         image_size_kb: null,
         order_index: s.orderIndex,
@@ -784,6 +788,19 @@ export async function submitPrompt(
 
   const sb = getSupabaseClient();
   if (sb) {
+    // Verify the prompt is not yet locked (copied by host or image already attached)
+    const { data: current } = await sb
+      .from('game_submissions')
+      .select('copied_at, image_data')
+      .eq('room_code', code)
+      .eq('player_id', playerId)
+      .eq('round_number', roundNumber)
+      .maybeSingle();
+
+    if (current?.copied_at || current?.image_data) {
+      throw new Error('הפרומפט כבר ננעל כי המארח התחיל לייצר את התמונה שלך!');
+    }
+
     const { error } = await sb
       .from('game_submissions')
       .update({
@@ -806,9 +823,45 @@ export async function submitPrompt(
     (s) => s.playerId === playerId && s.roundNumber === roundNumber
   );
   if (!sub) throw new Error('לא נמצאה משימה לסיבוב זה');
+  if (sub.copiedAt || sub.imageData) {
+    throw new Error('הפרומפט כבר ננעל כי המארח התחיל לייצר את התמונה שלך!');
+  }
   sub.prompt = cleanPrompt;
   sub.promptSubmittedAt = now;
   sub.updatedAt = now;
+  await writeLocalSnapshot(snap);
+  return snap;
+}
+
+export async function markPromptCopied(
+  code: string,
+  submissionId: string
+): Promise<RoomSnapshot> {
+  const now = new Date().toISOString();
+  const sb = getSupabaseClient();
+
+  if (sb) {
+    const { error } = await sb
+      .from('game_submissions')
+      .update({
+        copied_at: now,
+        updated_at: now,
+      })
+      .eq('id', submissionId)
+      .eq('room_code', code);
+
+    if (error) throw new Error(error.message);
+    await broadcastSupabaseEvent(code, { type: 'state_ping', updatedAt: now });
+    return (await getRoomSnapshot(code))!;
+  }
+
+  const snap = await getRoomSnapshot(code);
+  if (!snap) throw new Error('החדר לא נמצא');
+  const sub = snap.submissions.find((s) => s.id === submissionId);
+  if (sub) {
+    sub.copiedAt = now;
+    sub.updatedAt = now;
+  }
   await writeLocalSnapshot(snap);
   return snap;
 }
@@ -1406,6 +1459,7 @@ export async function nextRoundOrFinale(code: string): Promise<RoomSnapshot> {
     secretWord: assignedWords[idx].word,
     prompt: '',
     promptSubmittedAt: null,
+    copiedAt: null,
     imageData: null,
     imageSizeKb: null,
     orderIndex: idx,
@@ -1438,6 +1492,7 @@ export async function nextRoundOrFinale(code: string): Promise<RoomSnapshot> {
         secret_word: s.secretWord,
         prompt: '',
         prompt_submitted_at: null,
+        copied_at: null,
         image_data: null,
         image_size_kb: null,
         order_index: s.orderIndex,

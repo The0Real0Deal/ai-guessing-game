@@ -48,6 +48,7 @@ create table if not exists public.game_submissions (
   secret_word text not null,
   prompt text not null default '',
   prompt_submitted_at timestamptz,
+  copied_at timestamptz,
   image_data text,
   image_size_kb integer,
   order_index integer not null default 0,
@@ -58,6 +59,9 @@ create table if not exists public.game_submissions (
   awarded_guesser_pts integer not null default 0,
   updated_at timestamptz not null default now()
 );
+
+alter table public.game_submissions
+  add column if not exists copied_at timestamptz;
 
 create index if not exists idx_game_submissions_room_round
   on public.game_submissions(room_code, round_number);

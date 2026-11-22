@@ -46,6 +46,7 @@ export interface Submission {
   secretWord: string;
   prompt: string;
   promptSubmittedAt: string | null;
+  copiedAt: string | null;
   imageData: string | null;
   imageSizeKb: number | null;
   orderIndex: number;
@@ -108,12 +109,26 @@ export type BroadcastEvent =
   | { type: 'confetti'; style: 'reveal' | 'round' | 'finale' }
   | { type: 'state_ping'; updatedAt: string };
 
+export type AwardIconKey = 'palette' | 'search' | 'sparkles';
+
 export interface SuperlativeAward {
   id: string;
-  emoji: string;
+  icon: AwardIconKey;
   title: string;
   subtitle: string;
   winnerNames: string[];
-  winnerAvatars: string[];
   statLabel: string;
+}
+
+export interface PlayerRankTrend {
+  player: Player;
+  currentRank: number;
+  prevRank: number;
+  rankChange: number; // > 0 climbed, < 0 dropped, 0 steady
+}
+
+export interface ForbiddenMatch {
+  word: string;
+  start: number;
+  end: number;
 }
