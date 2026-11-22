@@ -23,6 +23,7 @@ import { SyncStatusBadge } from '../components/SyncStatusBadge';
 import { useCountdown } from '../hooks/useCountdown';
 import { useRoom } from '../hooks/useRoom';
 import {
+  buildFinaleWinnerPrompt,
   buildGeminiCopyPrompt,
   calculateRoundPlan,
   generateId,
@@ -32,6 +33,7 @@ import {
   sortPlayersByScore,
 } from '../lib/gameLogic';
 import {
+  attachFinaleImage,
   attachPlayerImage,
   awardPointsAndReveal,
   clearPlayerImage,
@@ -89,10 +91,17 @@ export function HostControlPage() {
   const [dragOverSubId, setDragOverSubId] = useState<string | null>(null);
   const [pasteFeedback, setPasteFeedback] = useState<string | null>(null);
 
-  // Per-item toggle for "הצג מושג למנחש" (Host-only high-contrast concept reveal)
+  // Per-item toggle for "הצג מושג למנחש" in prompting phase; guessing phase shows concept & prompt ALWAYS by default
   const [revealedConcepts, setRevealedConcepts] = useState<Record<string, boolean>>({});
+  const [hideGuessJudgeCard, setHideGuessJudgeCard] = useState(false);
+
+  // Finale winner caricature prompt & paste state (before revealing winner!)
+  const [finalePromptCopied, setFinalePromptCopied] = useState(false);
+  const [compressingFinaleImg, setCompressingFinaleImg] = useState(false);
+  const [finaleDragOver, setFinaleDragOver] = useState(false);
 
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const finaleFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Ordered player queue for the active round
   const roundSubs = snapshot
@@ -112,6 +121,26 @@ export function HostControlPage() {
   const toggleConceptVisibility = (subId: string) => {
     setRevealedConcepts((prev) => ({ ...prev, [subId]: !prev[subId] }));
   };
+
+  const handleFinaleImageBlob = useCallback(
+    async (blob: Blob) => {
+      if (!code) return;
+      setActionError('');
+      setCompressingFinaleImg(true);
+      try {
+        const compressed = await compressImageBlob(blob);
+        const fresh = await attachFinaleImage(code, compressed.dataUrl, compressed.sizeKb);
+        setSnapshot(fresh);
+        setPasteFeedback(`✅ תמונת הניצחון לגמר הודבקה ונדחסה (${compressed.sizeKb} KB)! מוכנים לחשוף את המנצח!`);
+        window.setTimeout(() => setPasteFeedback(null), 4000);
+      } catch (err: unknown) {
+        setActionError(err instanceof Error ? err.message : 'שגיאה בעיבוד תמונת הגמר');
+      } finally {
+        setCompressingFinaleImg(false);
+      }
+    },
+    [code, setSnapshot]
+  );
 
   const handleImageBlobForSubmission = useCallback(
     async (subId: string, blob: Blob) => {
@@ -148,15 +177,26 @@ export function HostControlPage() {
     [code, setSnapshot]
   );
 
-  // Global Ctrl+V / Cmd+V listener ANYWHERE in the Host Control Panel!
+  const isPreFinaleStage =
+    Boolean(snapshot) &&
+    ((snapshot!.room.phase === 'round_leaderboard' &&
+      snapshot!.room.currentRound >= snapshot!.room.totalRounds) ||
+      snapshot!.room.phase === 'finale');
+
+  // Global Ctrl+V / Cmd+V listener ANYWHERE in the Host Control Panel (prompting & finale image)!
   useEffect(() => {
-    if (!code || snapshot?.room.phase !== 'prompting') return;
+    if (!code || (!isPreFinaleStage && snapshot?.room.phase !== 'prompting')) return;
 
     const onWindowPaste = (e: ClipboardEvent) => {
       const imageFile = extractImageFileFromTransfer(e.clipboardData);
       if (!imageFile) return;
 
       e.preventDefault();
+      if (isPreFinaleStage) {
+        handleFinaleImageBlob(imageFile);
+        return;
+      }
+
       const targetSubId =
         activePasteSubId ||
         roundSubs.find((s) => !s.imageData)?.id ||
@@ -169,7 +209,15 @@ export function HostControlPage() {
 
     window.addEventListener('paste', onWindowPaste);
     return () => window.removeEventListener('paste', onWindowPaste);
-  }, [code, snapshot?.room.phase, activePasteSubId, roundSubs, handleImageBlobForSubmission]);
+  }, [
+    code,
+    snapshot?.room.phase,
+    isPreFinaleStage,
+    activePasteSubId,
+    roundSubs,
+    handleImageBlobForSubmission,
+    handleFinaleImageBlob,
+  ]);
 
   const { remaining, isRunning, isUrgent } = useCountdown(
     snapshot?.room.timerEndsAt || null,
@@ -927,35 +975,42 @@ export function HostControlPage() {
                   <img src={currentGuess.imageData || ''} alt={currentGuess.secretWord} />
                 </div>
 
-                {/* High-Contrast "הצג מושג למנחש" Toggle */}
+                {/* Always-Visible High-Contrast Concept & Original Prompt Card for Judging */}
                 <div className="host-concept-toggle-wrap">
-                  <button
-                    id="btn-toggle-host-concept"
-                    type="button"
-                    className={`btn-brutal btn-touch ${
-                      revealedConcepts[currentGuess.id] ? 'btn-dark' : 'btn-yellow'
-                    }`}
-                    onClick={() => toggleConceptVisibility(currentGuess.id)}
-                  >
-                    {revealedConcepts[currentGuess.id] ? <EyeOff size={20} /> : <Eye size={20} />}
-                    <span>
-                      {revealedConcepts[currentGuess.id]
-                        ? 'הסתר מושג סודי'
-                        : 'הצג מושג למנחש'}
-                    </span>
-                  </button>
-
-                  {revealedConcepts[currentGuess.id] && (
-                    <div className="high-contrast-concept-card is-large pop-in">
-                      <span className="hccc-label">המושג הסודי (למארח בלבד):</span>
+                  {!hideGuessJudgeCard ? (
+                    <div className="high-contrast-concept-card is-large">
+                      <div className="hccc-top-bar">
+                        <span className="hccc-label">לשופט (למארח בלבד) — המושג והפרומפט המקורי:</span>
+                        <button
+                          id="btn-toggle-host-concept"
+                          type="button"
+                          className="btn-hccc-hide"
+                          onClick={() => setHideGuessJudgeCard(true)}
+                        >
+                          <EyeOff size={14} /> הסתר
+                        </button>
+                      </div>
                       <div className="hccc-word">{currentGuess.secretWord}</div>
                       <div className="hccc-meta">
-                        יוצר: <strong>{currentCreator?.nickname}</strong>
+                        יוצר/ת: <strong>{currentCreator?.avatar} {currentCreator?.nickname}</strong>
                       </div>
-                      {currentGuess.prompt && (
-                        <div className="hccc-prompt">פרומפט: ״{currentGuess.prompt}״</div>
-                      )}
+                      <div className="hccc-prompt-block">
+                        <span className="hccc-prompt-title">הפרומפט המקורי שנשלח:</span>
+                        <div className="hccc-prompt-value">
+                          {currentGuess.prompt ? `״${currentGuess.prompt}״` : '— (לא הוזן פרומפט)'}
+                        </div>
+                      </div>
                     </div>
+                  ) : (
+                    <button
+                      id="btn-toggle-host-concept"
+                      type="button"
+                      className="btn-brutal btn-yellow btn-touch"
+                      onClick={() => setHideGuessJudgeCard(false)}
+                    >
+                      <Eye size={20} />
+                      <span>הצג מושג ופרומפט מקורי</span>
+                    </button>
                   )}
                 </div>
 
@@ -1128,37 +1183,199 @@ export function HostControlPage() {
         )}
 
         {/* ================================================================ */}
-        {/* HOST ROUND LEADERBOARD CONTROL                                   */}
+        {/* HOST ROUND LEADERBOARD CONTROL (+ PRE-FINALE WINNER CARICATURE)  */}
         {/* ================================================================ */}
-        {room.phase === 'round_leaderboard' && (
-          <div className="host-transition-wrap">
-            <div className="stage-card host-transition-card">
-              <div className="sticker-tag tag-yellow mini-tag">
-                סיבוב {room.currentRound} מתוך {room.totalRounds} הסתיים!
-              </div>
-              <h2>טבלת הניקוד מוצגת כעת על המסך הראשי</h2>
-              <p className="muted-text">
-                תנו לכולם רגע לראות מי עלה בדירוג — וכשתהיו מוכנים לחצו למטה להמשיך!
-              </p>
+        {room.phase === 'round_leaderboard' && (() => {
+          const isFinalRound = room.currentRound >= room.totalRounds;
+          const finalePrompt = isFinalRound ? buildFinaleWinnerPrompt(players) : '';
+          const finaleImg = room.settings.finaleImageData || null;
 
-              <AnimatedLeaderboard players={players} compact />
+          const copyFinalePrompt = async () => {
+            if (!finalePrompt) return;
+            try {
+              await navigator.clipboard.writeText(finalePrompt);
+            } catch {
+              const ta = document.createElement('textarea');
+              ta.value = finalePrompt;
+              document.body.appendChild(ta);
+              ta.select();
+              document.execCommand('copy');
+              ta.remove();
+            }
+            setFinalePromptCopied(true);
+            setCopiedToast('פרומפט קריקטורת הגמר הועתק! הדביקו ב-Gemini, העתיקו את התמונה ולחצו Ctrl+V כאן.');
+            window.setTimeout(() => setCopiedToast(null), 4000);
+          };
 
-              <div className="host-transition-actions">
-                <button
-                  id="btn-host-next-round"
-                  type="button"
-                  className="btn-brutal btn-coral btn-xl"
-                  disabled={busyAction === 'next-round'}
-                  onClick={() => runAction('next-round', () => nextRoundOrFinale(room.code))}
-                >
-                  {room.currentRound >= room.totalRounds
-                    ? 'לגמר הגדול והכרזת המנצח!'
-                    : `התחל סיבוב ${room.currentRound + 1} מתוך ${room.totalRounds}!`}
-                </button>
+          const pasteFinaleFromClipboard = async () => {
+            setActionError('');
+            try {
+              const blob = await readImageFromClipboardApi();
+              if (!blob) {
+                setActionError('אין תמונה בלוח ההעתקה! העתיקו תמונה מ-Gemini ולחצו Ctrl+V.');
+                return;
+              }
+              await handleFinaleImageBlob(blob);
+            } catch (err: unknown) {
+              setActionError(err instanceof Error ? err.message : 'לחצו Ctrl+V בכל מקום במסך להדבקת תמונת הגמר!');
+            }
+          };
+
+          return (
+            <div className="host-transition-wrap">
+              <div className="stage-card host-transition-card">
+                <div className="sticker-tag tag-yellow mini-tag">
+                  סיבוב {room.currentRound} מתוך {room.totalRounds} הסתיים!
+                </div>
+                <h2>
+                  {isFinalRound
+                    ? 'הסיבוב האחרון הסתיים! לפני שחושפים את המנצח...'
+                    : 'טבלת הניקוד מוצגת כעת על המסך הראשי'}
+                </h2>
+                <p className="muted-text">
+                  {isFinalRound
+                    ? 'הכינו תמונת גמר קורעת ב-Gemini (כל השחקנים כדמויות אימוג׳י בוכים למטה והמנצח מרים גביע וצוחק מלמעלה!) והדביקו כאן לפני החשיפה:'
+                    : 'תנו לכולם רגע לראות מי עלה בדירוג — וכשתהיו מוכנים לחצו למטה להמשיך!'}
+                </p>
+
+                {/* Pre-Finale Secret Winner Caricature Generator Box */}
+                {isFinalRound && (
+                  <div className="finale-prep-box">
+                    <div className="finale-prep-head">
+                      <strong>🏆 פרומפט קריקטורת הגמר ל-Gemini (סודי למארח!)</strong>
+                      <button
+                        type="button"
+                        className={`btn-copy-prompt ${finalePromptCopied ? 'is-copied' : ''}`}
+                        onClick={copyFinalePrompt}
+                      >
+                        {finalePromptCopied ? (
+                          <>
+                            <Check size={14} strokeWidth={3} /> הועתק! (העתק שוב)
+                          </>
+                        ) : (
+                          <>
+                            <Copy size={14} /> העתק פרומפט גמר ל-Gemini
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <p className="finale-prep-prompt">{finalePrompt}</p>
+
+                    <div
+                      tabIndex={0}
+                      className={`image-dropzone selected ${finaleDragOver ? 'drag-over' : ''} ${
+                        finaleImg ? 'filled' : ''
+                      }`}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setFinaleDragOver(true);
+                      }}
+                      onDragLeave={() => setFinaleDragOver(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setFinaleDragOver(false);
+                        const file = extractImageFileFromTransfer(e.dataTransfer);
+                        if (file) handleFinaleImageBlob(file);
+                      }}
+                    >
+                      <input
+                        ref={finaleFileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden-file-input"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleFinaleImageBlob(file);
+                          e.target.value = '';
+                        }}
+                      />
+
+                      {compressingFinaleImg ? (
+                        <div className="dropzone-loading">
+                          <div className="spinner-brutal sm" />
+                          <span>דוחס ומסנכרן את תמונת הגמר...</span>
+                        </div>
+                      ) : finaleImg ? (
+                        <div className="dropzone-preview">
+                          <img src={finaleImg} alt="תמונת הניצחון לגמר" />
+                          <div className="dropzone-preview-bar">
+                            <span className="size-pill">
+                              ✅ מוכנה לגמר! ({room.settings.finaleImageSizeKb || '?'} KB)
+                            </span>
+                            <div className="dropzone-mini-actions">
+                              <button
+                                type="button"
+                                className="btn-mini-brutal"
+                                onClick={() => finaleFileInputRef.current?.click()}
+                              >
+                                החלף
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-icon-danger"
+                                title="מחק תמונת גמר"
+                                onClick={() =>
+                                  runAction('clear-finale-img', () =>
+                                    attachFinaleImage(room.code, null, null)
+                                  )
+                                }
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="dropzone-empty">
+                          <div className="dropzone-hint">
+                            <strong className="paste-ready-tag">
+                              העתיקו את התמונה מ-Gemini ולחצו <kbd dir="ltr">Ctrl+V</kbd> בכל מקום במסך!
+                            </strong>
+                          </div>
+                          <div className="dropzone-btn-row">
+                            <button
+                              type="button"
+                              className="btn-mini-brutal btn-mini-yellow"
+                              onClick={pasteFinaleFromClipboard}
+                            >
+                              <ClipboardPaste size={15} /> הדבק תמונת גמר מהלוח
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-mini-brutal"
+                              onClick={() => finaleFileInputRef.current?.click()}
+                            >
+                              <Upload size={15} /> העלה תמונה
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <AnimatedLeaderboard players={players} compact />
+
+                <div className="host-transition-actions">
+                  <button
+                    id="btn-host-next-round"
+                    type="button"
+                    className={`btn-brutal btn-xl ${isFinalRound && finaleImg ? 'btn-green' : 'btn-coral'}`}
+                    disabled={busyAction === 'next-round'}
+                    onClick={() => runAction('next-round', () => nextRoundOrFinale(room.code))}
+                  >
+                    {isFinalRound
+                      ? finaleImg
+                        ? '🏆 חשוף את המנצח ותמונת הגמר במסך הראשי!'
+                        : '🏆 לגמר הגדול והכרזת המנצח!'
+                      : `התחל סיבוב ${room.currentRound + 1} מתוך ${room.totalRounds}!`}
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ================================================================ */}
         {/* HOST GRAND FINALE CONTROL                                        */}
@@ -1169,7 +1386,7 @@ export function HostControlPage() {
               <div className="sticker-tag tag-yellow mini-tag">הגמר הגדול</div>
               <h2>הכרזת המנצח ורגעי השיא מוצגים על המסך הראשי!</h2>
               <p className="muted-text">
-                כל הסיבובים הושלמו בהצלחה. אפשר לפוצץ עוד קונפטי או לפתוח משחק חדש באותו החדר (השחקנים יישארו מחוברים).
+                כל הסיבובים הושלמו בהצלחה. אפשר לפוצץ עוד קונפטי, להדביק/להחליף תמונת גמר (<kbd dir="ltr">Ctrl+V</kbd>) או לפתוח משחק חדש באותו החדר.
               </p>
 
               <AnimatedLeaderboard players={players} compact />

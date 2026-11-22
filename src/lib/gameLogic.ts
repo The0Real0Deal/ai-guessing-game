@@ -446,6 +446,37 @@ export function buildGeminiCopyPrompt(playerPrompt: string): string {
   return `צור קריקטורה של ${playerPrompt.trim()}`;
 }
 
+/**
+ * Generates a hilarious Hebrew Gemini caricature prompt for the Grand Finale:
+ * All players appear as their emoji characters with their Hebrew names on them;
+ * the winner(s) stand on top holding a trophy and laughing down at everyone else,
+ * while all the other players cry comically below.
+ */
+export function buildFinaleWinnerPrompt(players: Player[]): string {
+  const sorted = sortPlayersByScore(players);
+  if (sorted.length === 0) return '';
+
+  const topScore = sorted[0].score;
+  const winners = sorted.filter((p) => p.score === topScore);
+  const losers = sorted.filter((p) => p.score < topScore);
+
+  const formatChar = (p: Player) => `דמות של ${p.avatar} עם תגית שם ברורה "${p.nickname}"`;
+
+  const winnersText = winners.map(formatChar).join(' ו-');
+  const isPluralWinners = winners.length > 1;
+
+  if (losers.length === 0) {
+    return `צור קריקטורה צבעונית, מוגזמת ומצחיקה בסגנון פיקסאר של טקס ניצחון במסיבה: בראש פודיום מוזהב עומדים ${winnersText}, מרימים יחד גביע זהב ענק וצוחקים בקול רם בניצחון מוחץ. על כל דמות כתוב השם שלה בעברית בצורה ברורה. סגנון קומיקס קליל, קונפטי באוויר ותאורה חגיגית.`;
+  }
+
+  const losersText = losers.map(formatChar).join(', ');
+  const winnerAction = isPluralWinners
+    ? `למעלה בראש פודיום מוזהב גבוה עומדים ${winnersText}, מרימים גביע זהב ענק וצוחקים על כולם מלמעלה`
+    : `למעלה בראש פודיום מוזהב גבוה עומד/ת ${winnersText}, מרים/ה גביע זהב ענק וצוחק/ת על כולם מלמעלה`;
+
+  return `צור קריקטורה צבעונית, מוגזמת ומצחיקה בסגנון פיקסאר של טקס סיום משחק: ${winnerAction}. למטה סביב הפודיום נמצאות שאר הדמויות וכולן בוכות בצורה דרמטית וקורעת מצחוק עם דמעות ענקיות: ${losersText}. הקפד שהשם של כל שחקן יופיע בבירור על הדמות שלו בעברית, עם הבעות פנים מוגזמות ומצחיקות, קונפטי באוויר ותאורת במה חגיגית.`;
+}
+
 export type HostQueueStatusKey = 'waiting' | 'ready_to_copy' | 'image_pasted' | 'finished';
 
 export interface HostQueueStatus {

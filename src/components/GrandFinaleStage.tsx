@@ -18,6 +18,7 @@ import type { AwardIconKey, Player, RoundHistoryItem } from '../lib/types';
 interface GrandFinaleStageProps {
   players: Player[];
   history: RoundHistoryItem[];
+  finaleImageData?: string | null;
   compact?: boolean;
   highlightPlayerId?: string;
 }
@@ -46,6 +47,7 @@ function getMonogram(name: string): string {
 export function GrandFinaleStage({
   players,
   history,
+  finaleImageData,
   compact = false,
   highlightPlayerId,
 }: GrandFinaleStageProps) {
@@ -105,6 +107,21 @@ export function GrandFinaleStage({
             : `עם ${topScore} נקודות ומוח חד יותר מפרומפט של 500 מילה — קבלו את הזוכה של הערב!`}
         </p>
       </div>
+
+      {/* Custom Gemini Victory Caricature Showcase */}
+      {finaleImageData && (
+        <figure className="finale-caricature-frame zoom-in">
+          <div className="finale-caricature-badge">
+            <Trophy size={16} strokeWidth={2.6} />
+            <span>קריקטורת הניצחון הרשמית של הערב</span>
+          </div>
+          <img
+            src={finaleImageData}
+            alt="קריקטורת הניצחון של כל השחקנים"
+            className="finale-caricature-img"
+          />
+        </figure>
+      )}
 
       {/* Choreographed 3-Place Podium */}
       {podium.length > 0 && (

@@ -669,6 +669,7 @@ export function PlayerMobilePage() {
           <GrandFinaleStage
             players={players}
             history={room.history}
+            finaleImageData={room.settings.finaleImageData}
             compact
             highlightPlayerId={me.id}
           />

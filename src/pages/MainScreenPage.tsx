@@ -507,7 +507,11 @@ export function MainScreenPage() {
 
         {/* PHASE 5: GRAND FINALE (ZERO EMOJIS, VECTOR/TYPOGRAPHIC + HIGHLIGHTS) */}
         {room.phase === 'finale' && (
-          <GrandFinaleStage players={players} history={room.history} />
+          <GrandFinaleStage
+            players={players}
+            history={room.history}
+            finaleImageData={room.settings.finaleImageData}
+          />
         )}
       </main>
     </div>

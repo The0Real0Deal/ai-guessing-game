@@ -21,6 +21,8 @@ export interface GameSettings {
   timerSeconds: number;
   guesserPoints: number;
   creatorPoints: number;
+  finaleImageData?: string | null;
+  finaleImageSizeKb?: number | null;
 }
 
 export interface Player {

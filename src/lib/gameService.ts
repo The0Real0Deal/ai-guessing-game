@@ -1539,8 +1539,32 @@ export async function nextRoundOrFinale(code: string): Promise<RoomSnapshot> {
   return snap;
 }
 
+export async function attachFinaleImage(
+  code: string,
+  imageData: string | null,
+  imageSizeKb: number | null
+): Promise<RoomSnapshot> {
+  const snap = await getRoomSnapshot(code);
+  if (!snap) throw new Error('החדר לא נמצא');
+
+  const nextSettings: GameSettings = {
+    ...snap.room.settings,
+    finaleImageData: imageData,
+    finaleImageSizeKb: imageSizeKb,
+  };
+  return updateRoomSettings(code, nextSettings);
+}
+
 export async function resetRoomForNewGame(code: string): Promise<RoomSnapshot> {
   const now = new Date().toISOString();
+  const snapBefore = await getRoomSnapshot(code);
+  const cleanedSettings: GameSettings | undefined = snapBefore
+    ? {
+        ...snapBefore.room.settings,
+        finaleImageData: null,
+        finaleImageSizeKb: null,
+      }
+    : undefined;
   const sb = getSupabaseClient();
 
   if (sb) {
@@ -1553,6 +1577,7 @@ export async function resetRoomForNewGame(code: string): Promise<RoomSnapshot> {
       .from('game_rooms')
       .update({
         phase: 'lobby',
+        ...(cleanedSettings ? { settings: cleanedSettings } : {}),
         word_deck: [],
         current_round: 0,
         total_rounds: 0,
@@ -1569,7 +1594,7 @@ export async function resetRoomForNewGame(code: string): Promise<RoomSnapshot> {
     return (await getRoomSnapshot(code))!;
   }
 
-  const snap = await getRoomSnapshot(code);
+  const snap = snapBefore;
   if (!snap) throw new Error('החדר לא נמצא');
   snap.players = snap.players.map((p) => ({
     ...p,
@@ -1580,6 +1605,7 @@ export async function resetRoomForNewGame(code: string): Promise<RoomSnapshot> {
     roundDelta: 0,
   }));
   snap.submissions = [];
+  if (cleanedSettings) snap.room.settings = cleanedSettings;
   snap.room.phase = 'lobby';
   snap.room.wordDeck = [];
   snap.room.currentRound = 0;

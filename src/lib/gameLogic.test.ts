@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildFinaleWinnerPrompt,
   buildGeminiCopyPrompt,
   buildRoundWordDeck,
   calculateRoundPlan,
@@ -197,5 +198,59 @@ describe('findForbiddenWords, buildGeminiCopyPrompt & getHostQueueStatus', () =>
     expect(copied.isCopied).toBe(true);
     expect(getHostQueueStatus({ ...base, prompt: 'יצור חמוד', imageData: 'data:image/webp;base64,X' }).label).toBe('הודבקה תמונה');
     expect(getHostQueueStatus({ ...base, prompt: 'יצור חמוד', imageData: 'data:image/webp;base64,X', revealed: true }).label).toBe('הסתיים');
+  });
+
+  it('builds hilarious finale winner prompt with all player emojis, names, winner with trophy and crying losers', () => {
+    const players: Player[] = [
+      {
+        id: 'p1',
+        roomCode: '1234',
+        nickname: 'דניאל',
+        avatar: '🐱',
+        score: 7,
+        guesserScore: 4,
+        creatorScore: 3,
+        prevScore: 5,
+        roundDelta: 2,
+        connected: true,
+        joinedAt: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'p2',
+        roomCode: '1234',
+        nickname: 'נועה',
+        avatar: '🦊',
+        score: 4,
+        guesserScore: 2,
+        creatorScore: 2,
+        prevScore: 4,
+        roundDelta: 0,
+        connected: true,
+        joinedAt: '2026-01-01T00:00:01Z',
+      },
+      {
+        id: 'p3',
+        roomCode: '1234',
+        nickname: 'עומר',
+        avatar: '🦖',
+        score: 2,
+        guesserScore: 1,
+        creatorScore: 1,
+        prevScore: 2,
+        roundDelta: 0,
+        connected: true,
+        joinedAt: '2026-01-01T00:00:02Z',
+      },
+    ];
+
+    const prompt = buildFinaleWinnerPrompt(players);
+    expect(prompt).toContain('🐱');
+    expect(prompt).toContain('דניאל');
+    expect(prompt).toContain('🦊');
+    expect(prompt).toContain('נועה');
+    expect(prompt).toContain('🦖');
+    expect(prompt).toContain('עומר');
+    expect(prompt).toContain('גביע');
+    expect(prompt).toContain('בוכות');
   });
 });
